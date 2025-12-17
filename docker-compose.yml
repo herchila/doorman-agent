@@ -1,0 +1,50 @@
+# =============================================================================
+# Celery Doorman - Docker Compose
+# =============================================================================
+# Standalone deployment - no external dependencies needed for simulation mode.
+#
+# Usage:
+#   # Run simulation (self-contained demo)
+#   docker-compose run --rm doorman --simulate --workers 1
+#   docker-compose run --rm doorman --simulate --workers 0 --enqueue 5
+#
+#   # Run with external Redis (production-like)
+#   docker-compose up -d
+#
+# =============================================================================
+
+services:
+  # Doorman service - can run in simulation or production mode
+  doorman:
+    build: .
+    container_name: celery-doorman
+    restart: "no"
+    volumes:
+      - ./celery_doorman.py:/app/celery_doorman.py:ro
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      # These are used in production mode (ignored in simulation)
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      # Uncomment to enable notifications
+      # - SLACK_WEBHOOK_URL=https://hooks.slack.com/services/XXX/YYY/ZZZ
+    # Default: run in simulation mode with 1 worker
+    command: ["--simulate", "--workers", "1"]
+    depends_on:
+      - redis
+
+  # Redis for production mode (not needed for simulation)
+  redis:
+    image: redis:7-alpine
+    container_name: celery-doorman-redis
+    ports:
+      - "6399:6379"  # Non-standard port to avoid conflicts
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  default:
+    name: celery-doorman_network

@@ -1,0 +1,46 @@
+# =============================================================================
+# Celery Doorman - Systemd Service
+# =============================================================================
+# Install at: /etc/systemd/system/celery-doorman.service
+#
+# Commands:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable celery-doorman
+#   sudo systemctl start celery-doorman
+#   sudo journalctl -u celery-doorman -f
+# =============================================================================
+
+[Unit]
+Description=Celery Doorman - Silent Queue Guardian
+After=network.target redis.service
+Wants=redis.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/celery-doorman
+ExecStart=/opt/celery-doorman/venv/bin/python celery_doorman.py --config /opt/celery-doorman/config.yaml
+Restart=always
+RestartSec=10
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+# Optional: Environment variables in separate file
+# EnvironmentFile=/opt/celery-doorman/.env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=celery-doorman
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/celery-doorman
+
+[Install]
+WantedBy=multi-user.target

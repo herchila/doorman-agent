@@ -1,0 +1,14 @@
+# =============================================================================
+# Celery Doorman - Python Dependencies
+# =============================================================================
+# pip install -r requirements.txt
+
+# Core
+redis>=4.0.0,<6.0.0
+celery>=5.2.0,<6.0.0
+
+# Configuration
+pyyaml>=6.0
+
+# Optional: For better performance with Redis
+hiredis>=2.0.0
