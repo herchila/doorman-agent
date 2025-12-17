@@ -12,3 +12,6 @@ pyyaml>=6.0
 
 # Optional: For better performance with Redis
 hiredis>=2.0.0
+
+# Development
+ipdb>=0.13.13

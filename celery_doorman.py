@@ -28,8 +28,7 @@ import logging
 import argparse
 from datetime import datetime, timezone
 from typing import Optional, Dict, List, Any
-from dataclasses import dataclass, field, asdict
-from enum import Enum
+from dataclasses import dataclass, field
 import urllib.request
 import urllib.error
 
@@ -72,22 +71,19 @@ class AlertThresholds:
 @dataclass
 class Config:
     """Complete Doorman configuration"""
-    # Connections
+    # API Connection (required for production)
+    api_key: Optional[str] = None
+    api_url: str = "https://api.doorman.com"
+    
+    # Local connections (for metrics collection)
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_app_name: str = "tasks"
     
-    # Webhooks
-    slack_webhook_url: Optional[str] = None
-    pagerduty_routing_key: Optional[str] = None
-    generic_webhook_url: Optional[str] = None
-    
     # Behavior
     check_interval_seconds: int = 30
-    alert_cooldown_seconds: int = 300  # Don't repeat same alert for 5 min
-    auto_kill_zombie_tasks: bool = False
     
-    # Thresholds
+    # Thresholds (used locally for logging, API does the actual alerting)
     thresholds: AlertThresholds = field(default_factory=AlertThresholds)
     
     # Queues to monitor (empty = all)
@@ -97,34 +93,6 @@ class Config:
 # =============================================================================
 # DATA MODELS
 # =============================================================================
-
-class AlertSeverity(Enum):
-    INFO = "info"
-    WARNING = "warning"
-    CRITICAL = "critical"
-    EMERGENCY = "emergency"
-
-
-@dataclass
-class Alert:
-    """Represents an alert to be sent"""
-    severity: AlertSeverity
-    title: str
-    message: str
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    metrics: Dict[str, Any] = field(default_factory=dict)
-    alert_type: str = ""
-    
-    def to_dict(self) -> Dict:
-        return {
-            "severity": self.severity.value,
-            "title": self.title,
-            "message": self.message,
-            "timestamp": self.timestamp,
-            "metrics": self.metrics,
-            "alert_type": self.alert_type
-        }
-
 
 @dataclass
 class QueueMetrics:
@@ -426,314 +394,289 @@ class MetricsCollector:
 
 
 # =============================================================================
-# RISK ANALYZER
+# API CLIENT
 # =============================================================================
 
-class RiskAnalyzer:
-    """Analyzes metrics and generates alerts based on configured thresholds"""
-    
-    def __init__(self, config: Config, logger: StructuredLogger):
-        self.config = config
-        self.logger = logger
-        self.thresholds = config.thresholds
-        self.alert_history: Dict[str, float] = {}  # alert_key -> last_sent_timestamp
-    
-    def _should_alert(self, alert_key: str) -> bool:
-        """Checks if we should send alert (cooldown)"""
-        now = time.time()
-        last_sent = self.alert_history.get(alert_key, 0)
-        
-        if now - last_sent > self.config.alert_cooldown_seconds:
-            self.alert_history[alert_key] = now
-            return True
-        return False
-    
-    def analyze(self, metrics: SystemMetrics) -> List[Alert]:
-        """Analyzes metrics and returns list of alerts"""
-        alerts = []
-        
-        # =================================================================
-        # Scenario A: Massive Backlog (Backlog Explosion)
-        # =================================================================
-        if metrics.total_pending_tasks > self.thresholds.max_queue_size:
-            alert_key = "backlog_explosion"
-            if self._should_alert(alert_key):
-                alerts.append(Alert(
-                    severity=AlertSeverity.CRITICAL,
-                    title="🚨 Backlog Explosion Detected",
-                    message=f"Total pending tasks ({metrics.total_pending_tasks}) exceeds threshold ({self.thresholds.max_queue_size})",
-                    alert_type=alert_key,
-                    metrics={
-                        "total_pending": metrics.total_pending_tasks,
-                        "threshold": self.thresholds.max_queue_size,
-                        "queues": {q.name: q.depth for q in metrics.queues}
-                    }
-                ))
-        
-        # =================================================================
-        # Scenario B: Silent Death (Workers down but queue filling)
-        # =================================================================
-        if metrics.alive_workers == 0 and metrics.total_pending_tasks > 0:
-            alert_key = "workers_down"
-            if self._should_alert(alert_key):
-                alerts.append(Alert(
-                    severity=AlertSeverity.EMERGENCY,
-                    title="🔴 EMERGENCY: All Workers Down",
-                    message=f"No workers responding but {metrics.total_pending_tasks} tasks are pending!",
-                    alert_type=alert_key,
-                    metrics={
-                        "pending_tasks": metrics.total_pending_tasks,
-                        "total_workers": metrics.total_workers,
-                        "alive_workers": 0
-                    }
-                ))
-        
-        # Some workers down (partial)
-        elif metrics.total_workers > 0 and metrics.alive_workers < metrics.total_workers:
-            dead_count = metrics.total_workers - metrics.alive_workers
-            alert_key = f"workers_partial_down_{dead_count}"
-            if self._should_alert(alert_key):
-                alerts.append(Alert(
-                    severity=AlertSeverity.WARNING,
-                    title="⚠️ Workers Partially Down",
-                    message=f"{dead_count} of {metrics.total_workers} workers not responding",
-                    alert_type="workers_partial_down",
-                    metrics={
-                        "total_workers": metrics.total_workers,
-                        "alive_workers": metrics.alive_workers,
-                        "dead_workers": dead_count
-                    }
-                ))
-        
-        # =================================================================
-        # Scenario C: Zombie Tasks (Stuck tasks)
-        # =================================================================
-        for stuck_task in metrics.stuck_tasks:
-            alert_key = f"stuck_task_{stuck_task['task_id']}"
-            if self._should_alert(alert_key):
-                alerts.append(Alert(
-                    severity=AlertSeverity.WARNING,
-                    title="🧟 Zombie Task Detected",
-                    message=f"Task {stuck_task['task_name']} running for {stuck_task['runtime_seconds']/60:.1f} minutes",
-                    alert_type="stuck_task",
-                    metrics=stuck_task
-                ))
-        
-        # =================================================================
-        # Scenario D: High Latency in Critical Queues
-        # =================================================================
-        for queue in metrics.queues:
-            if queue.oldest_task_age_seconds is not None:
-                if queue.oldest_task_age_seconds > self.thresholds.max_wait_time_seconds:
-                    # Higher severity for critical queues
-                    is_critical = queue.name in self.thresholds.critical_queues
-                    severity = AlertSeverity.CRITICAL if is_critical else AlertSeverity.WARNING
-                    
-                    alert_key = f"high_latency_{queue.name}"
-                    if self._should_alert(alert_key):
-                        alerts.append(Alert(
-                            severity=severity,
-                            title=f"⏰ High Latency in Queue: {queue.name}",
-                            message=f"Oldest task waiting {queue.oldest_task_age_seconds:.0f}s (threshold: {self.thresholds.max_wait_time_seconds}s)",
-                            alert_type="high_latency",
-                            metrics={
-                                "queue": queue.name,
-                                "wait_time_seconds": queue.oldest_task_age_seconds,
-                                "threshold_seconds": self.thresholds.max_wait_time_seconds,
-                                "queue_depth": queue.depth,
-                                "is_critical_queue": is_critical
-                            }
-                        ))
-        
-        # =================================================================
-        # Scenario E: Critical Queue with Backlog
-        # =================================================================
-        for queue in metrics.queues:
-            if queue.name in self.thresholds.critical_queues and queue.depth > 100:
-                alert_key = f"critical_queue_backlog_{queue.name}"
-                if self._should_alert(alert_key):
-                    alerts.append(Alert(
-                        severity=AlertSeverity.WARNING,
-                        title=f"📊 Critical Queue Backlog: {queue.name}",
-                        message=f"Critical queue '{queue.name}' has {queue.depth} pending tasks",
-                        alert_type="critical_queue_backlog",
-                        metrics={
-                            "queue": queue.name,
-                            "depth": queue.depth
-                        }
-                    ))
-        
-        # =================================================================
-        # Scenario F: Connection lost
-        # =================================================================
-        if not metrics.redis_connected:
-            alert_key = "redis_disconnected"
-            if self._should_alert(alert_key):
-                alerts.append(Alert(
-                    severity=AlertSeverity.EMERGENCY,
-                    title="🔴 Redis Connection Lost",
-                    message="Cannot connect to Redis broker",
-                    alert_type=alert_key,
-                    metrics={"redis_connected": False}
-                ))
-        
-        if not metrics.celery_connected and metrics.redis_connected:
-            alert_key = "celery_disconnected"
-            if self._should_alert(alert_key):
-                alerts.append(Alert(
-                    severity=AlertSeverity.WARNING,
-                    title="⚠️ Celery Inspect Failed",
-                    message="Cannot inspect Celery workers (they may be down or unreachable)",
-                    alert_type=alert_key,
-                    metrics={"celery_connected": False}
-                ))
-        
-        return alerts
+# Agent version - update this on releases
+AGENT_VERSION = "1.0.0"
 
 
-# =============================================================================
-# NOTIFIER
-# =============================================================================
-
-class Notifier:
-    """Sends alerts to different destinations"""
+class APIClient:
+    """
+    Client for communicating with doorman.com API.
+    The agent only collects and sends metrics - the API handles analysis and notifications.
+    """
     
-    def __init__(self, config: Config, logger: StructuredLogger):
-        self.config = config
-        self.logger = logger
+    DEFAULT_API_URL = "https://api.doorman.com"
     
-    def _http_post(self, url: str, payload: Dict, headers: Dict = None) -> bool:
-        """Sends POST request"""
-        if not headers:
-            headers = {}
-        headers['Content-Type'] = 'application/json'
+    def __init__(self, api_key: str, api_url: Optional[str] = None, logger: Optional[StructuredLogger] = None):
+        self.api_key = api_key
+        self.api_url = (api_url or self.DEFAULT_API_URL).rstrip('/')
+        self.logger = logger or StructuredLogger("doorman-api-client")
+        self._session_id = self._generate_session_id()
+        
+    def _generate_session_id(self) -> str:
+        """Generate a unique session ID for this agent instance"""
+        import hashlib
+        import platform
+        
+        unique_string = f"{platform.node()}-{os.getpid()}-{time.time()}"
+        return hashlib.sha256(unique_string.encode()).hexdigest()[:16]
+    
+    def _hash_worker_id(self, worker_name: str) -> str:
+        """Generate a privacy-safe hash for worker identification"""
+        import hashlib
+        return "w-" + hashlib.sha256(worker_name.encode()).hexdigest()[:8]
+    
+    def _sanitize_display_name(self, worker_name: str) -> str:
+        """
+        Extract clean display name from worker hostname.
+        'celery@worker-1.prod.internal' -> 'worker-1'
+        'celery@ip-10-0-1-234' -> 'ip-10-0-1-234'
+        """
+        # Remove celery@ prefix
+        if '@' in worker_name:
+            worker_name = worker_name.split('@', 1)[1]
+        
+        # Remove domain suffix
+        if '.' in worker_name:
+            worker_name = worker_name.split('.')[0]
+        
+        return worker_name
+    
+    def _worker_status(self, is_alive: bool, active_tasks: int, stuck_task_ids: set) -> str:
+        """Determine worker status"""
+        if not is_alive:
+            return "offline"
+        # Check if worker has any stuck tasks (will be populated from stuck_tasks list)
+        # For now, basic logic - can be extended
+        return "online"
+    
+    def _sanitize_queue_name(self, queue_name: str) -> str:
+        """
+        Sanitize queue name to remove potential PII.
+        Detects email patterns and replaces them.
+        """
+        import re
+        
+        # Pattern for email addresses
+        email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        sanitized = re.sub(email_pattern, '[email_redacted]', queue_name)
+        
+        # Pattern for UUIDs (might contain user IDs)
+        uuid_pattern = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+        sanitized = re.sub(uuid_pattern, '[uuid_redacted]', sanitized, flags=re.IGNORECASE)
+        
+        return sanitized
+    
+    def _get_headers(self) -> Dict[str, str]:
+        """Returns headers for API requests"""
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": f"doorman-agent/{AGENT_VERSION}",
+            "X-Agent-Session": self._session_id
+        }
+    
+    def _make_request(self, method: str, endpoint: str, payload: Optional[Dict] = None) -> tuple[bool, Optional[Dict]]:
+        """Makes HTTP request to the API"""
+        url = f"{self.api_url}{endpoint}"
         
         try:
-            data = json.dumps(payload).encode('utf-8')
-            req = urllib.request.Request(url, data=data, headers=headers, method='POST')
-            
-            with urllib.request.urlopen(req, timeout=10) as response:
-                return response.status == 200
-                
-        except urllib.error.URLError as e:
-            self.logger.error("HTTP request failed", url=url, error=str(e))
-            return False
-        except Exception as e:
-            self.logger.error("Notification failed", url=url, error=str(e))
-            return False
-    
-    def send_to_slack(self, alert: Alert) -> bool:
-        """Sends alert to Slack webhook"""
-        if not self.config.slack_webhook_url:
-            return False
-        
-        # Map severity to color
-        color_map = {
-            AlertSeverity.INFO: "#36a64f",       # Green
-            AlertSeverity.WARNING: "#ffcc00",    # Yellow
-            AlertSeverity.CRITICAL: "#ff6600",   # Orange
-            AlertSeverity.EMERGENCY: "#ff0000"   # Red
-        }
-        
-        payload = {
-            "attachments": [{
-                "color": color_map.get(alert.severity, "#808080"),
-                "title": alert.title,
-                "text": alert.message,
-                "fields": [
-                    {"title": k, "value": str(v), "short": True}
-                    for k, v in alert.metrics.items()
-                ][:10],  # Limit fields
-                "footer": "Celery Doorman",
-                "ts": int(time.time())
-            }]
-        }
-        
-        success = self._http_post(self.config.slack_webhook_url, payload)
-        if success:
-            self.logger.info("Slack notification sent", alert_type=alert.alert_type)
-        return success
-    
-    def send_to_pagerduty(self, alert: Alert) -> bool:
-        """Sends alert to PagerDuty"""
-        if not self.config.pagerduty_routing_key:
-            return False
-        
-        # Map severity to PagerDuty severity
-        severity_map = {
-            AlertSeverity.INFO: "info",
-            AlertSeverity.WARNING: "warning",
-            AlertSeverity.CRITICAL: "critical",
-            AlertSeverity.EMERGENCY: "critical"
-        }
-        
-        payload = {
-            "routing_key": self.config.pagerduty_routing_key,
-            "event_action": "trigger",
-            "payload": {
-                "summary": f"{alert.title}: {alert.message}",
-                "severity": severity_map.get(alert.severity, "warning"),
-                "source": "celery-doorman",
-                "custom_details": alert.metrics
-            }
-        }
-        
-        success = self._http_post(
-            "https://events.pagerduty.com/v2/enqueue",
-            payload
-        )
-        if success:
-            self.logger.info("PagerDuty notification sent", alert_type=alert.alert_type)
-        return success
-    
-    def send_to_generic_webhook(self, alert: Alert) -> bool:
-        """Sends to generic webhook (full JSON)"""
-        if not self.config.generic_webhook_url:
-            return False
-        
-        payload = alert.to_dict()
-        payload['source'] = 'celery-doorman'
-        
-        success = self._http_post(self.config.generic_webhook_url, payload)
-        if success:
-            self.logger.info("Webhook notification sent", alert_type=alert.alert_type)
-        return success
-    
-    def notify(self, alert: Alert):
-        """Sends alert to all configured destinations"""
-        sent = False
-        
-        if self.config.slack_webhook_url:
-            sent = self.send_to_slack(alert) or sent
-            
-        if self.config.pagerduty_routing_key:
-            sent = self.send_to_pagerduty(alert) or sent
-            
-        if self.config.generic_webhook_url:
-            sent = self.send_to_generic_webhook(alert) or sent
-        
-        if not sent:
-            # At least log the alert
-            self.logger.warning(
-                "Alert generated but no notification channel configured",
-                alert=alert.to_dict()
+            data = json.dumps(payload).encode('utf-8') if payload else None
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers=self._get_headers(),
+                method=method
             )
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response_data = json.loads(response.read().decode('utf-8'))
+                return True, response_data
+                
+        except urllib.error.HTTPError as e:
+            error_body = None
+            try:
+                error_body = json.loads(e.read().decode('utf-8'))
+            except:
+                pass
+            
+            self.logger.error(
+                "API request failed",
+                endpoint=endpoint,
+                status_code=e.code,
+                error=error_body or str(e)
+            )
+            
+            # Handle specific error codes
+            if e.code == 401:
+                self.logger.error("Invalid API key. Please check your DOORMAN_API_KEY.")
+            elif e.code == 403:
+                self.logger.error("API key does not have permission for this operation.")
+            elif e.code == 429:
+                self.logger.warning("Rate limited. Will retry on next check interval.")
+            
+            return False, error_body
+            
+        except urllib.error.URLError as e:
+            self.logger.error("API connection failed", endpoint=endpoint, error=str(e))
+            return False, None
+            
+        except Exception as e:
+            self.logger.error("Unexpected API error", endpoint=endpoint, error=str(e))
+            return False, None
+    
+    def validate_api_key(self) -> bool:
+        """Validates the API key with the server"""
+        success, response = self._make_request("GET", "/api/v1/auth/validate")
+        
+        if success and response:
+            self.logger.info(
+                "API key validated",
+                organization=response.get("organization", "unknown"),
+                plan=response.get("plan", "unknown")
+            )
+            return True
+        
+        return False
+    
+    def send_metrics(self, metrics: SystemMetrics) -> bool:
+        """
+        Sends collected metrics to the API using privacy-first schema.
+        The API will analyze the metrics and trigger notifications if needed.
+        """
+        # Build worker ID hash lookup for anomalies references
+        worker_hash_lookup = {}
+        stuck_worker_refs = set()
+        
+        # First pass: identify workers with stuck tasks
+        for stuck in metrics.stuck_tasks:
+            worker_name = stuck.get('worker', '')
+            if worker_name:
+                stuck_worker_refs.add(worker_name)
+        
+        # Build workers list with privacy-safe identifiers
+        workers_payload = []
+        for w in metrics.workers:
+            id_hash = self._hash_worker_id(w.name)
+            worker_hash_lookup[w.name] = id_hash
+            
+            # Determine status
+            if not w.is_alive:
+                status = "offline"
+            elif w.name in stuck_worker_refs:
+                status = "stuck"
+            else:
+                status = "online"
+            
+            workers_payload.append({
+                "id_hash": id_hash,
+                "display_name": self._sanitize_display_name(w.name),
+                "active_tasks": w.active_tasks,
+                "status": status
+            })
+        
+        # Build anomalies list
+        anomalies_payload = []
+        for stuck in metrics.stuck_tasks:
+            worker_name = stuck.get('worker', '')
+            anomalies_payload.append({
+                "type": "stuck_task",
+                "task_id": stuck.get('task_id', 'unknown'),
+                "task_signature": stuck.get('task_name', 'unknown'),
+                "worker_ref": worker_hash_lookup.get(worker_name, "w-unknown"),
+                "duration_sec": stuck.get('runtime_seconds', 0),
+                "started_at": stuck.get('started_at'),
+                "detected_at": metrics.timestamp
+            })
+        
+        # Build final payload
+        payload = {
+            "timestamp": metrics.timestamp,
+            "agent_version": AGENT_VERSION,
+            "agent_session": self._session_id,
+            
+            "metrics": {
+                "total_pending": metrics.total_pending_tasks,
+                "total_active": metrics.total_active_tasks,
+                "total_workers": metrics.total_workers,
+                "alive_workers": metrics.alive_workers
+            },
+            
+            "infra_health": {
+                "redis": metrics.redis_connected,
+                "celery": metrics.celery_connected
+            },
+            
+            "queues": [
+                {
+                    "name": self._sanitize_queue_name(q.name),
+                    "depth": q.depth,
+                    "latency_sec": q.oldest_task_age_seconds
+                }
+                for q in metrics.queues
+            ],
+            
+            "workers": workers_payload,
+            
+            "anomalies": anomalies_payload
+        }
+        
+        import ipdb; ipdb.set_trace()
+        success, response = self._make_request("POST", "/api/v1/metrics", payload)
+        
+        if success:
+            self.logger.info(
+                "Metrics sent to API",
+                total_pending=metrics.total_pending_tasks,
+                alive_workers=metrics.alive_workers,
+                anomalies_count=len(anomalies_payload),
+                alerts_triggered=response.get("alerts_triggered", 0) if response else 0
+            )
+        
+        return success
+    
+    def send_heartbeat(self) -> bool:
+        """Sends a heartbeat to indicate the agent is alive"""
+        payload = {
+            "agent_session": self._session_id,
+            "agent_version": AGENT_VERSION,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        success, _ = self._make_request("POST", "/api/v1/heartbeat", payload)
+        return success
 
 
 # =============================================================================
-# MAIN DOORMAN
+# MAIN DOORMAN AGENT
 # =============================================================================
 
 class CeleryDoorman:
-    """The silent guardian of your queues"""
+    """
+    The Doorman Agent - a lightweight metrics collector that sends data to doorman.com.
+    
+    The agent is intentionally "dumb" - it only collects metrics and sends them to the API.
+    All analysis, alerting logic, and notifications are handled server-side.
+    """
     
     def __init__(self, config: Config):
         self.config = config
-        self.logger = StructuredLogger("celery-doorman")
+        self.logger = StructuredLogger("doorman-agent")
         self.collector = MetricsCollector(config, self.logger)
-        self.analyzer = RiskAnalyzer(config, self.logger)
-        self.notifier = Notifier(config, self.logger)
+        self.api_client: Optional[APIClient] = None
         self.running = False
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 10
+        
+        # Initialize API client if API key is provided
+        if config.api_key:
+            self.api_client = APIClient(
+                api_key=config.api_key,
+                api_url=config.api_url,
+                logger=self.logger
+            )
         
     def setup_signal_handlers(self):
         """Configures handlers for graceful shutdown"""
@@ -745,11 +688,11 @@ class CeleryDoorman:
         signal.signal(signal.SIGINT, handle_shutdown)
     
     def check_once(self) -> SystemMetrics:
-        """Executes one monitoring cycle"""
+        """Executes one monitoring cycle: collect metrics and send to API"""
         # Collect metrics
         metrics = self.collector.collect()
         
-        # Log status (always, for observability)
+        # Log status locally (always, for observability)
         self.logger.info(
             "Health check completed",
             pending_tasks=metrics.total_pending_tasks,
@@ -761,36 +704,54 @@ class CeleryDoorman:
             stuck_tasks_count=len(metrics.stuck_tasks)
         )
         
-        # Analyze and generate alerts
-        alerts = self.analyzer.analyze(metrics)
-        
-        # Send notifications
-        for alert in alerts:
-            self.logger.warning(
-                "Alert triggered",
-                severity=alert.severity.value,
-                alert_type=alert.alert_type,
-                title=alert.title
-            )
-            self.notifier.notify(alert)
+        # Send metrics to API if configured
+        if self.api_client:
+            success = self.api_client.send_metrics(metrics)
+            
+            import ipdb; ipdb.set_trace()
+            if success:
+                self._consecutive_failures = 0
+            else:
+                self._consecutive_failures += 1
+                
+                if self._consecutive_failures >= self._max_consecutive_failures:
+                    self.logger.error(
+                        "Too many consecutive API failures",
+                        count=self._consecutive_failures,
+                        action="Agent will continue collecting but metrics are not being sent"
+                    )
+        else:
+            # No API client - just log locally (useful for testing/simulation)
+            self.logger.warning("No API key configured - metrics are only logged locally")
         
         return metrics
     
     def run(self):
-        """Runs the main daemon loop"""
+        """Runs the main agent loop"""
         self.logger.info(
-            "Celery Doorman starting",
+            "Doorman Agent starting",
             check_interval=self.config.check_interval_seconds,
-            monitored_queues=self.config.monitored_queues
+            monitored_queues=self.config.monitored_queues,
+            api_url=self.config.api_url if self.api_client else "not configured"
         )
         
-        # Connect
+        # Validate API key if configured
+        if self.api_client:
+            self.logger.info("Validating API key...")
+            if not self.api_client.validate_api_key():
+                self.logger.error("API key validation failed. Please check your DOORMAN_API_KEY.")
+                sys.exit(1)
+            self.logger.info("API key validated successfully")
+        
+        # Connect to Redis/Celery
         if not self.collector.connect():
             self.logger.error("Failed to establish connections, exiting")
             sys.exit(1)
         
         self.setup_signal_handlers()
         self.running = True
+        
+        self.logger.info("Agent is now running. Press Ctrl+C to stop.")
         
         while self.running:
             try:
@@ -804,7 +765,7 @@ class CeleryDoorman:
                     break
                 time.sleep(1)
         
-        self.logger.info("Celery Doorman stopped")
+        self.logger.info("Doorman Agent stopped")
 
 
 # =============================================================================
@@ -824,19 +785,20 @@ def load_config(config_path: Optional[str] = None) -> Config:
                 yaml_config = yaml.safe_load(f)
                 
             if yaml_config:
-                # Map values
+                # API settings
+                config.api_key = yaml_config.get('api_key', config.api_key)
+                config.api_url = yaml_config.get('api_url', config.api_url)
+                
+                # Connection settings
                 config.redis_url = yaml_config.get('redis_url', config.redis_url)
                 config.celery_broker_url = yaml_config.get('celery_broker_url', config.celery_broker_url)
                 config.celery_app_name = yaml_config.get('celery_app_name', config.celery_app_name)
-                config.slack_webhook_url = yaml_config.get('slack_webhook_url')
-                config.pagerduty_routing_key = yaml_config.get('pagerduty_routing_key')
-                config.generic_webhook_url = yaml_config.get('generic_webhook_url')
+                
+                # Behavior
                 config.check_interval_seconds = yaml_config.get('check_interval_seconds', config.check_interval_seconds)
-                config.alert_cooldown_seconds = yaml_config.get('alert_cooldown_seconds', config.alert_cooldown_seconds)
-                config.auto_kill_zombie_tasks = yaml_config.get('auto_kill_zombie_tasks', config.auto_kill_zombie_tasks)
                 config.monitored_queues = yaml_config.get('monitored_queues', config.monitored_queues)
                 
-                # Thresholds
+                # Thresholds (for local logging)
                 if 'thresholds' in yaml_config:
                     t = yaml_config['thresholds']
                     config.thresholds.max_queue_size = t.get('max_queue_size', config.thresholds.max_queue_size)
@@ -844,19 +806,14 @@ def load_config(config_path: Optional[str] = None) -> Config:
                     config.thresholds.max_task_runtime_seconds = t.get('max_task_runtime_seconds', config.thresholds.max_task_runtime_seconds)
                     config.thresholds.critical_queues = t.get('critical_queues', config.thresholds.critical_queues)
     
-    # Environment variables override file
+    # Environment variables override file (API key from env is recommended)
+    config.api_key = os.environ.get('DOORMAN_API_KEY', config.api_key)
+    config.api_url = os.environ.get('DOORMAN_API_URL', config.api_url)
     config.redis_url = os.environ.get('REDIS_URL', config.redis_url)
     config.celery_broker_url = os.environ.get('CELERY_BROKER_URL', config.celery_broker_url)
-    config.slack_webhook_url = os.environ.get('SLACK_WEBHOOK_URL', config.slack_webhook_url)
-    config.pagerduty_routing_key = os.environ.get('PAGERDUTY_ROUTING_KEY', config.pagerduty_routing_key)
-    config.generic_webhook_url = os.environ.get('GENERIC_WEBHOOK_URL', config.generic_webhook_url)
     
     if os.environ.get('CHECK_INTERVAL'):
         config.check_interval_seconds = int(os.environ['CHECK_INTERVAL'])
-    if os.environ.get('MAX_QUEUE_SIZE'):
-        config.thresholds.max_queue_size = int(os.environ['MAX_QUEUE_SIZE'])
-    if os.environ.get('MAX_WAIT_TIME'):
-        config.thresholds.max_wait_time_seconds = int(os.environ['MAX_WAIT_TIME'])
     
     return config
 
@@ -1197,41 +1154,37 @@ def run_simulation(num_workers: int, enqueue_tasks: int = 0):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Celery Doorman - Silent Queue Guardian',
+        description='Doorman Agent - Celery/Redis Monitoring Agent',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run as daemon (production)
-  python celery_doorman.py --config config.yaml
+  # Run agent (production mode - sends metrics to doorman.com)
+  DOORMAN_API_KEY=your-api-key doorman-agent --config config.yaml
   
-  # Single execution (for cron)
-  python celery_doorman.py --once
+  # Single check (for testing)
+  DOORMAN_API_KEY=your-api-key doorman-agent --once
   
-  # With environment variables
-  REDIS_URL=redis://localhost:6379/0 SLACK_WEBHOOK_URL=https://... python celery_doorman.py
+  # Run without API (local logging only)
+  doorman-agent --config config.yaml
 
-Simulation Mode (for demos/testing):
+Simulation Mode (for demos/testing - no API key required):
   # Healthy scenario: 1 worker, no pending tasks
-  python celery_doorman.py --simulate --workers 1
+  doorman-agent --simulate --workers 1
   
-  # Workers down scenario (WARNING)
-  python celery_doorman.py --simulate --workers 0
+  # Workers down scenario
+  doorman-agent --simulate --workers 0
   
   # EMERGENCY scenario: workers down + tasks pending
-  python celery_doorman.py --simulate --workers 0 --enqueue 5
-  
-  # Backlog scenario: tasks accumulating
-  python celery_doorman.py --simulate --workers 1 --enqueue 50
+  doorman-agent --simulate --workers 0 --enqueue 5
 
-Supported environment variables:
-  REDIS_URL              - Redis connection URL
-  CELERY_BROKER_URL      - Celery broker URL
-  SLACK_WEBHOOK_URL      - Slack webhook for alerts
-  PAGERDUTY_ROUTING_KEY  - PagerDuty routing key
-  GENERIC_WEBHOOK_URL    - Generic webhook
-  CHECK_INTERVAL         - Check interval in seconds
-  MAX_QUEUE_SIZE         - Maximum queue size threshold
-  MAX_WAIT_TIME          - Maximum wait time threshold in seconds
+Environment Variables:
+  DOORMAN_API_KEY      - Your doorman.com API key (required for production)
+  DOORMAN_API_URL      - API URL (default: https://api.doorman.com)
+  REDIS_URL            - Redis connection URL
+  CELERY_BROKER_URL    - Celery broker URL
+  CHECK_INTERVAL       - Check interval in seconds
+
+Get your API key at: https://doorman.com/dashboard/api-keys
         """
     )
     
@@ -1243,19 +1196,22 @@ Supported environment variables:
     parser.add_argument(
         '--once', '-1',
         action='store_true',
-        help='Run only once (for cron jobs)'
+        help='Run only once (for testing)'
     )
     parser.add_argument(
-        '--dry-run',
-        action='store_true',
-        help='Do not send notifications, only log'
+        '--api-key', '-k',
+        help='Doorman API key (can also use DOORMAN_API_KEY env var)'
+    )
+    parser.add_argument(
+        '--api-url',
+        help='Doorman API URL (default: https://api.doorman.com)'
     )
     
     # Simulation arguments
     parser.add_argument(
         '--simulate', '-s',
         action='store_true',
-        help='Run in simulation mode (starts local Redis + workers)'
+        help='Run in simulation mode (starts local Redis + workers, no API required)'
     )
     parser.add_argument(
         '--workers', '-w',
@@ -1278,7 +1234,7 @@ Supported environment variables:
         print("   pip install redis celery pyyaml")
         sys.exit(1)
     
-    # Simulation mode
+    # Simulation mode (no API key required)
     if args.simulate:
         run_simulation(args.workers, args.enqueue)
         return
@@ -1287,13 +1243,19 @@ Supported environment variables:
     # Load configuration
     config = load_config(args.config)
     
-    # Dry run: disable webhooks
-    if args.dry_run:
-        config.slack_webhook_url = None
-        config.pagerduty_routing_key = None
-        config.generic_webhook_url = None
+    # Override with CLI arguments if provided
+    if args.api_key:
+        config.api_key = args.api_key
+    if args.api_url:
+        config.api_url = args.api_url
     
-    # Create and run Doorman
+    # Warn if no API key (but allow for local testing)
+    if not config.api_key:
+        print("\n⚠️  No API key configured. Metrics will only be logged locally.")
+        print("   Set DOORMAN_API_KEY or use --api-key to enable cloud monitoring.")
+        print("   Get your API key at: https://doorman.com/dashboard/api-keys\n")
+    
+    # Create and run agent
     doorman = CeleryDoorman(config)
     
     if not doorman.collector.connect():
@@ -1301,10 +1263,10 @@ Supported environment variables:
         sys.exit(1)
     
     if args.once:
-        # Cron mode: single execution
+        # Single check mode
         doorman.check_once()
     else:
-        # Daemon mode: infinite loop
+        # Daemon mode
         doorman.run()
 
 
