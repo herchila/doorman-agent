@@ -1,3 +1,25 @@
+"""
+Simulation environment for testing Doorman Agent
+"""
+
+import json
+import os
+import sys
+import time
+from typing import Any, List, Optional
+
+from doorman_agent.models import Config
+from doorman_agent.logger import StructuredLogger
+
+# Check dependencies at import time
+try:
+    import redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    redis = None
+    REDIS_AVAILABLE = False
+
+
 class SimulationEnvironment:
     """
     Self-contained simulation environment with Redis and Celery workers.
@@ -9,7 +31,7 @@ class SimulationEnvironment:
         self.logger = logger
         self.redis_process: Optional[Any] = None
         self.worker_processes: List[Any] = []
-        self.redis_port = 6399  # Use non-standard port to avoid conflicts
+        self.redis_port = 6399  # Non-standard port to avoid conflicts
         self.temp_dir: Optional[str] = None
         
     def _check_redis_server(self) -> bool:
@@ -78,17 +100,14 @@ def zombie_task():
             return False
         
         try:
-            # Start Redis on non-standard port
             self.redis_process = subprocess.Popen(
                 ['redis-server', '--port', str(self.redis_port), '--daemonize', 'no', '--loglevel', 'warning'],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
             
-            # Wait for Redis to be ready
             time.sleep(1)
             
-            # Test connection
             if REDIS_AVAILABLE:
                 test_client = redis.from_url(
                     f'redis://localhost:{self.redis_port}/0',
@@ -119,7 +138,6 @@ def zombie_task():
             for i in range(self.num_workers):
                 worker_name = f'sim_worker_{i+1}'
                 
-                # Start Celery worker
                 process = subprocess.Popen(
                     [
                         sys.executable, '-m', 'celery',
@@ -139,7 +157,6 @@ def zombie_task():
                 self.worker_processes.append(process)
                 self.logger.info("Worker started", worker=worker_name, pid=process.pid)
             
-            # Wait for workers to register
             time.sleep(3)
             return True
             
@@ -153,7 +170,6 @@ def zombie_task():
             return False
         
         try:
-            # Connect directly to Redis and enqueue Celery-formatted tasks
             client = redis.from_url(
                 f'redis://localhost:{self.redis_port}/0',
                 decode_responses=True
@@ -162,7 +178,6 @@ def zombie_task():
             for i in range(count):
                 task_id = f'sim-task-{int(time.time())}-{i}'
                 
-                # Celery task message format
                 task_message = json.dumps({
                     'body': json.dumps([[], {}]),
                     'headers': {
@@ -191,36 +206,37 @@ def zombie_task():
     def get_config(self) -> Config:
         """Returns a Config object for the simulation environment"""
         config = Config()
-        config.api_key = "test"
-        config.api_url = "http://localhost:9000"
+        config.local_mode = True  # Simulation always runs in local mode
         config.redis_url = f'redis://localhost:{self.redis_port}/0'
         config.celery_broker_url = f'redis://localhost:{self.redis_port}/0'
         config.check_interval_seconds = 10
-        config.alert_cooldown_seconds = 30
         config.monitored_queues = ['celery', 'default', 'simulation']
-        config.thresholds.max_queue_size = 10  # Lower thresholds for demo
+        config.thresholds.max_queue_size = 10
         config.thresholds.max_wait_time_seconds = 30
         return config
     
     def stop(self):
         """Stops all simulation processes"""
-        # Stop workers
         for process in self.worker_processes:
             try:
                 process.terminate()
                 process.wait(timeout=5)
             except:
-                process.kill()
+                try:
+                    process.kill()
+                except:
+                    pass
         
-        # Stop Redis
         if self.redis_process:
             try:
                 self.redis_process.terminate()
                 self.redis_process.wait(timeout=5)
             except:
-                self.redis_process.kill()
+                try:
+                    self.redis_process.kill()
+                except:
+                    pass
         
-        # Cleanup temp directory
         if self.temp_dir and os.path.exists(self.temp_dir):
             import shutil
             shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -228,37 +244,38 @@ def zombie_task():
         self.logger.info("Simulation environment stopped")
 
 
-def run_simulation(num_workers: int, enqueue_tasks: int = 0):
+def run_simulation(num_workers: int, enqueue_tasks_count: int = 0):
     """
     Runs Doorman in simulation mode with local Redis and configurable workers.
     
     Scenarios:
-        --workers 0                    : Workers down scenario (EMERGENCY if tasks pending)
+        --workers 0                    : Workers down scenario
         --workers 0 --enqueue 5        : Workers down + queue filling (EMERGENCY)
         --workers 1                    : Healthy scenario (1 worker)
         --workers 2                    : Healthy scenario (2 workers)
-        --workers 1 --enqueue 100      : Backlog scenario (if > threshold)
+        --workers 1 --enqueue 100      : Backlog scenario
     """
-    logger = StructuredLogger("celery-doorman-sim")
+    # Import here to avoid circular imports
+    from doorman_agent.agent import DoormanAgent
+    
+    logger = StructuredLogger("doorman-sim")
     
     print("\n" + "="*60)
-    print("🧪 CELERY DOORMAN - SIMULATION MODE")
+    print("🧪 DOORMAN AGENT - SIMULATION MODE")
     print("="*60)
     print(f"   Workers requested: {num_workers}")
-    print(f"   Tasks to enqueue:  {enqueue_tasks}")
+    print(f"   Tasks to enqueue:  {enqueue_tasks_count}")
     print("="*60 + "\n")
     
     sim = SimulationEnvironment(num_workers, logger)
     
     try:
-        # Start Redis
         print("📦 Starting Redis server...")
         if not sim.start_redis():
             print("❌ Failed to start Redis. Is redis-server installed?")
             return
-        print("✅ Redis started on port", sim.redis_port)
+        print(f"✅ Redis started on port {sim.redis_port}")
         
-        # Start workers
         if num_workers > 0:
             print(f"\n👷 Starting {num_workers} Celery worker(s)...")
             if not sim.start_workers():
@@ -269,41 +286,36 @@ def run_simulation(num_workers: int, enqueue_tasks: int = 0):
         else:
             print("\n⚠️  No workers started (simulating failure scenario)")
         
-        # Enqueue tasks if requested
-        if enqueue_tasks > 0:
-            print(f"\n📝 Enqueuing {enqueue_tasks} task(s)...")
-            if sim.enqueue_tasks(enqueue_tasks):
-                print(f"✅ {enqueue_tasks} task(s) enqueued")
+        if enqueue_tasks_count > 0:
+            print(f"\n📝 Enqueuing {enqueue_tasks_count} task(s)...")
+            if sim.enqueue_tasks(enqueue_tasks_count):
+                print(f"✅ {enqueue_tasks_count} task(s) enqueued")
             else:
                 print("❌ Failed to enqueue tasks")
         
-        # Create and run Doorman
         print("\n" + "-"*60)
         print("🚪 Starting Doorman monitoring...")
         print("-"*60 + "\n")
         
         config = sim.get_config()
-        # import ipdb; ipdb.set_trace()
-        doorman = CeleryDoorman(config)
+        agent = DoormanAgent(config)
         
-        if not doorman.collector.connect():
+        if not agent.collector.connect():
             print("❌ Doorman failed to connect")
             sim.stop()
             return
         
-        # Run monitoring loop
-        doorman.setup_signal_handlers()
-        doorman.running = True
+        agent.setup_signal_handlers()
+        agent.running = True
         
         check_count = 0
-        while doorman.running:
+        while agent.running:
             check_count += 1
             print(f"\n--- Health Check #{check_count} ---")
             
             try:
-                metrics = doorman.check_once()
+                metrics = agent.check_once()
                 
-                # Print summary
                 print(f"   📊 Pending tasks:  {metrics.total_pending_tasks}")
                 print(f"   👷 Alive workers:  {metrics.alive_workers}/{metrics.total_workers}")
                 print(f"   🔗 Redis:          {'✅' if metrics.redis_connected else '❌'}")
@@ -312,9 +324,8 @@ def run_simulation(num_workers: int, enqueue_tasks: int = 0):
             except Exception as e:
                 logger.error("Check failed", error=str(e))
             
-            # Sleep with interrupt check
             for _ in range(config.check_interval_seconds):
-                if not doorman.running:
+                if not agent.running:
                     break
                 time.sleep(1)
         

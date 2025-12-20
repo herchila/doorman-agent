@@ -1,15 +1,22 @@
+"""
+API Client for communicating with doorman.com
+"""
+
+import hashlib
 import json
 import os
+import platform
+import re
 import time
 import urllib.request
-
+import urllib.error
 from datetime import datetime, timezone
-from typing import Dict
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
 
-from src.doorman_agent.models import SystemMetrics
-from src.doorman_agent.logger import StructuredLogger
+from doorman_agent.models import SystemMetrics
+from doorman_agent.logger import StructuredLogger
 
+# Agent version - update on releases
 AGENT_VERSION = "0.1.0"
 
 
@@ -29,53 +36,35 @@ class APIClient:
         
     def _generate_session_id(self) -> str:
         """Generate a unique session ID for this agent instance"""
-        import hashlib
-        import platform
-        
         unique_string = f"{platform.node()}-{os.getpid()}-{time.time()}"
         return hashlib.sha256(unique_string.encode()).hexdigest()[:16]
     
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+    
     def _hash_worker_id(self, worker_name: str) -> str:
         """Generate a privacy-safe hash for worker identification"""
-        import hashlib
         return "w-" + hashlib.sha256(worker_name.encode()).hexdigest()[:8]
     
     def _sanitize_display_name(self, worker_name: str) -> str:
         """
         Extract clean display name from worker hostname.
         'celery@worker-1.prod.internal' -> 'worker-1'
-        'celery@ip-10-0-1-234' -> 'ip-10-0-1-234'
         """
-        # Remove celery@ prefix
         if '@' in worker_name:
             worker_name = worker_name.split('@', 1)[1]
-        
-        # Remove domain suffix
         if '.' in worker_name:
             worker_name = worker_name.split('.')[0]
-        
         return worker_name
     
-    def _worker_status(self, is_alive: bool, active_tasks: int, stuck_task_ids: set) -> str:
-        """Determine worker status"""
-        if not is_alive:
-            return "offline"
-        # Check if worker has any stuck tasks (will be populated from stuck_tasks list)
-        # For now, basic logic - can be extended
-        return "online"
-    
     def _sanitize_queue_name(self, queue_name: str) -> str:
-        """
-        Sanitize queue name to remove potential PII.
-        Detects email patterns and replaces them.
-        """
-        import re
-        
-        # Pattern for email addresses
+        """Sanitize queue name to remove potential PII"""
+        # Remove email addresses
         email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
         sanitized = re.sub(email_pattern, '[email_redacted]', queue_name)
         
-        # Pattern for UUIDs (might contain user IDs)
+        # Remove UUIDs
         uuid_pattern = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
         sanitized = re.sub(uuid_pattern, '[uuid_redacted]', sanitized, flags=re.IGNORECASE)
         
@@ -90,13 +79,12 @@ class APIClient:
             "X-Agent-Session": self._session_id
         }
     
-    def _make_request(self, method: str, endpoint: str, payload: Optional[Dict] = None) -> tuple[bool, Optional[Dict]]:
+    def _make_request(self, method: str, endpoint: str, payload: Optional[Dict] = None) -> Tuple[bool, Optional[Dict]]:
         """Makes HTTP request to the API"""
         url = f"{self.api_url}{endpoint}"
         
         try:
             data = json.dumps(payload).encode('utf-8') if payload else None
-            import ipdb; ipdb.set_trace()
             req = urllib.request.Request(
                 url,
                 data=data,
@@ -122,7 +110,6 @@ class APIClient:
                 error=error_body or str(e)
             )
             
-            # Handle specific error codes
             if e.code == 401:
                 self.logger.error("Invalid API key. Please check your DOORMAN_API_KEY.")
             elif e.code == 403:
@@ -154,16 +141,12 @@ class APIClient:
         
         return False
     
-    def send_metrics(self, metrics: SystemMetrics) -> bool:
-        """
-        Sends collected metrics to the API using privacy-first schema.
-        The API will analyze the metrics and trigger notifications if needed.
-        """
-        # Build worker ID hash lookup for anomalies references
-        worker_hash_lookup = {}
-        stuck_worker_refs = set()
+    def build_payload(self, metrics: SystemMetrics) -> Dict[str, Any]:
+        """Builds the API payload from metrics (privacy-first)"""
+        worker_hash_lookup: Dict[str, str] = {}
+        stuck_worker_refs: set = set()
         
-        # First pass: identify workers with stuck tasks
+        # Identify workers with stuck tasks
         for stuck in metrics.stuck_tasks:
             worker_name = stuck.get('worker', '')
             if worker_name:
@@ -175,7 +158,6 @@ class APIClient:
             id_hash = self._hash_worker_id(w.name)
             worker_hash_lookup[w.name] = id_hash
             
-            # Determine status
             if not w.is_alive:
                 status = "offline"
             elif w.name in stuck_worker_refs:
@@ -204,8 +186,7 @@ class APIClient:
                 "detected_at": metrics.timestamp
             })
         
-        # Build final payload
-        payload = {
+        return {
             "timestamp": metrics.timestamp,
             "agent_version": AGENT_VERSION,
             "agent_session": self._session_id,
@@ -232,19 +213,20 @@ class APIClient:
             ],
             
             "workers": workers_payload,
-            
             "anomalies": anomalies_payload
         }
-        
+    
+    def send_metrics(self, metrics: SystemMetrics) -> bool:
+        """Sends collected metrics to the API"""
+        payload = self.build_payload(metrics)
         success, response = self._make_request("POST", "/api/v1/metrics", payload)
         
-        import ipdb; ipdb.set_trace()
         if success:
             self.logger.info(
                 "Metrics sent to API",
                 total_pending=metrics.total_pending_tasks,
                 alive_workers=metrics.alive_workers,
-                anomalies_count=len(anomalies_payload),
+                anomalies_count=len(payload["anomalies"]),
                 alerts_triggered=response.get("alerts_triggered", 0) if response else 0
             )
         

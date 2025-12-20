@@ -1,24 +1,39 @@
+"""
+Metrics collector for Redis and Celery
+"""
+
 import json
 import time
-
-from typing import Dict
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Dict, Optional, Tuple
 
-from src.doorman_agent.celery_doorman import CELERY_AVAILABLE, REDIS_AVAILABLE
-from src.doorman_agent.config import Config
-from src.doorman_agent.logger import StructuredLogger
-from src.doorman_agent.models import QueueMetrics, SystemMetrics, WorkerMetrics
+from doorman_agent.models import Config, QueueMetrics, SystemMetrics, WorkerMetrics
+from doorman_agent.logger import StructuredLogger
+
+# Optional dependencies - check at runtime
+try:
+    import redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    redis = None
+    REDIS_AVAILABLE = False
+
+try:
+    from celery import Celery
+    CELERY_AVAILABLE = True
+except ImportError:
+    Celery = None
+    CELERY_AVAILABLE = False
 
 
 class MetricsCollector:
     """Collects metrics from Redis and Celery"""
     
-    def __init__(self, config: Config, logger: StructuredLogger):
+    def __init__(self, config: Config, logger: Optional[StructuredLogger] = None):
         self.config = config
-        self.logger = logger
-        self.redis_client: Optional[redis.Redis] = None
-        self.celery_app: Optional[Celery] = None
+        self.logger = logger or StructuredLogger("doorman-collector")
+        self.redis_client: Optional[Any] = None
+        self.celery_app: Optional[Any] = None
         
     def connect(self) -> bool:
         """Establishes connections with Redis and Celery"""
@@ -39,7 +54,7 @@ class MetricsCollector:
                 self.logger.error("Redis connection failed", error=str(e))
                 success = False
         else:
-            self.logger.warning("Redis library not available")
+            self.logger.warning("Redis library not available. Install with: pip install redis")
             success = False
             
         # Connect to Celery
@@ -58,7 +73,7 @@ class MetricsCollector:
                 self.logger.error("Celery initialization failed", error=str(e))
                 success = False
         else:
-            self.logger.warning("Celery library not available")
+            self.logger.warning("Celery library not available. Install with: pip install celery")
             success = False
             
         return success
@@ -69,7 +84,6 @@ class MetricsCollector:
             return 0
             
         try:
-            # Celery uses lists in Redis with the queue name
             depth = self.redis_client.llen(queue_name)
             return depth or 0
         except Exception as e:
@@ -77,38 +91,26 @@ class MetricsCollector:
             return 0
     
     def get_oldest_task_age(self, queue_name: str) -> Optional[float]:
-        """
-        Estimates the age of the oldest task in the queue.
-        Note: This requires inspecting the Celery message, which includes timestamp.
-        """
+        """Estimates the age of the oldest task in the queue"""
         if not self.redis_client:
             return None
             
         try:
-            # Get the oldest message (last in the list, since it's FIFO)
             oldest_message = self.redis_client.lindex(queue_name, -1)
             if not oldest_message:
                 return None
                 
-            # Parse the Celery message (it's JSON)
             try:
                 if isinstance(oldest_message, str):
                     task_data = json.loads(oldest_message)
                 else:
                     task_data = json.loads(oldest_message.decode('utf-8'))
                     
-                # Celery includes 'eta' or we can use the timestamp from body
-                # Format varies depending on Celery version
                 headers = task_data.get('headers', {})
-                
-                # Try to get timestamp from different places
                 timestamp = None
                 
-                # Option 1: headers.timestamp (Celery 5.x)
                 if 'timestamp' in headers:
                     timestamp = headers['timestamp']
-                    
-                # Option 2: properties.timestamp
                 elif 'properties' in task_data and 'timestamp' in task_data['properties']:
                     timestamp = task_data['properties']['timestamp']
                 
@@ -118,7 +120,6 @@ class MetricsCollector:
                     return max(0, age)
                     
             except (json.JSONDecodeError, KeyError, TypeError):
-                # If we can't parse, we can't estimate the age
                 pass
                 
             return None
@@ -127,27 +128,20 @@ class MetricsCollector:
             self.logger.error("Failed to get oldest task age", queue=queue_name, error=str(e))
             return None
     
-    def get_worker_stats(self) -> tuple[Dict, Dict, Dict]:
+    def get_worker_stats(self) -> Tuple[Dict, Dict, Dict]:
         """Gets worker statistics via Celery inspect"""
-        active = {}
-        reserved = {}
-        stats = {}
+        active: Dict = {}
+        reserved: Dict = {}
+        stats: Dict = {}
         
         if not self.celery_app:
             return active, reserved, stats
             
         try:
             inspector = self.celery_app.control.inspect(timeout=5)
-            
-            # Active tasks (running now)
             active = inspector.active() or {}
-            
-            # Reserved tasks (in worker memory, pending execution)
             reserved = inspector.reserved() or {}
-            
-            # General worker statistics
             stats = inspector.stats() or {}
-            
         except Exception as e:
             self.logger.error("Failed to inspect Celery workers", error=str(e))
             
@@ -186,7 +180,6 @@ class MetricsCollector:
         if active or reserved or stats:
             metrics.celery_connected = True
             
-        # Process workers
         all_workers = set(active.keys()) | set(reserved.keys()) | set(stats.keys())
         metrics.total_workers = len(all_workers)
         

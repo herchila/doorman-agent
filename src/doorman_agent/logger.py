@@ -1,15 +1,26 @@
+"""
+Structured JSON logger for Doorman Agent
+"""
+
+import json
+import logging
+import sys
+from datetime import datetime, timezone
+
+
 class StructuredLogger:
     """Logger that emits structured JSON to stdout"""
     
-    def __init__(self, name: str = "celery-doorman"):
+    def __init__(self, name: str = "doorman-agent"):
         self.name = name
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.INFO)
         
-        # Handler for stdout with JSON format
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(self._JsonFormatter())
-        self.logger.addHandler(handler)
+        # Avoid duplicate handlers
+        if not self.logger.handlers:
+            handler = logging.StreamHandler(sys.stdout)
+            handler.setFormatter(self._JsonFormatter())
+            self.logger.addHandler(handler)
     
     class _JsonFormatter(logging.Formatter):
         def format(self, record):
@@ -19,7 +30,6 @@ class StructuredLogger:
                 "message": record.getMessage(),
                 "logger": record.name
             }
-            # Add extra fields if they exist
             if hasattr(record, 'extra_fields'):
                 log_obj.update(record.extra_fields)
             return json.dumps(log_obj)
@@ -42,3 +52,6 @@ class StructuredLogger:
     
     def critical(self, message: str, **kwargs):
         self._log(logging.CRITICAL, message, **kwargs)
+    
+    def debug(self, message: str, **kwargs):
+        self._log(logging.DEBUG, message, **kwargs)
