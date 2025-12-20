@@ -1,16 +1,82 @@
 [project]
-name = "celery-doorman"
+name = "doorman-agent"
 version = "0.1.0"
-description = ""
+description = "Lightweight monitoring agent for Celery/Redis queues"
 authors = [
-    {name = "Hernán Chilabert",email = "hchilabert@gmail.com"}
+    {name = "Hernán Chilabert", email = "hchilabert@gmail.com"}
 ]
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.9"
-dependencies = [
+keywords = ["celery", "redis", "monitoring", "alerting", "queue"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Systems Administration",
 ]
 
+dependencies = [
+    "redis>=4.0.0,<6.0.0",
+    "celery>=5.2.0,<6.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+]
+performance = [
+    "hiredis>=2.0.0",
+]
+
+[project.scripts]
+doorman-agent = "doorman_agent.cli:main"
+
+[project.urls]
+Homepage = "https://doorman.com"
+Documentation = "https://docs.doorman.com"
+Repository = "https://github.com/doorman/doorman-agent"
+Issues = "https://github.com/doorman/doorman-agent/issues"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "doorman-agent"
+version = "0.1.0"
+description = "Lightweight monitoring agent for Celery/Redis queues"
+authors = ["Hernán Chilabert <hchilabert@gmail.com>"]
+packages = [{include = "doorman_agent", from = "src"}]
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311', 'py312']
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I", "N", "UP"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

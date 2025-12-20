@@ -1,29 +1,37 @@
 # =============================================================================
-# Celery Doorman - Configuration File
+# Doorman Agent - Configuration File
 # =============================================================================
 # Copy this file as config.yaml and adjust according to your environment.
+#
+# Get your API key at: https://doorman.com/dashboard/api-keys
 
 # -----------------------------------------------------------------------------
-# Connections
+# API Connection
 # -----------------------------------------------------------------------------
-redis_url: "redis://redis:6379/0"
-celery_broker_url: "redis://redis:6379/0"
+# Your doorman.com API key - recommended to set via DOORMAN_API_KEY env var
+api_key: null  # Or set DOORMAN_API_KEY environment variable
+
+# API endpoint (default: https://api.doorman.com)
+api_url: "https://api.doorman.com"
+
+# -----------------------------------------------------------------------------
+# Local Mode
+# -----------------------------------------------------------------------------
+# Set to true to only log metrics locally (no API calls)
+# Useful for testing or when you want to analyze logs without sending to API
+local_mode: false
+
+# -----------------------------------------------------------------------------
+# Redis/Celery Connections
+# -----------------------------------------------------------------------------
+redis_url: "redis://localhost:6379/0"
+celery_broker_url: "redis://localhost:6379/0"
 celery_app_name: "tasks"
 
 # -----------------------------------------------------------------------------
-# Alert Webhooks
-# Configure at least one to receive notifications
+# Agent Behavior
 # -----------------------------------------------------------------------------
-slack_webhook_url: null  # https://hooks.slack.com/services/XXX/YYY/ZZZ
-pagerduty_routing_key: null  # Your PagerDuty Events API v2 routing key
-generic_webhook_url: null  # Any endpoint that accepts JSON POST
-
-# -----------------------------------------------------------------------------
-# Behavior
-# -----------------------------------------------------------------------------
-check_interval_seconds: 30  # How often to check (recommended: 30-60)
-alert_cooldown_seconds: 300  # Don't repeat same alert for 5 minutes
-auto_kill_zombie_tasks: false  # ⚠️ Dangerous: automatically kill stuck tasks
+check_interval_seconds: 30  # How often to collect and send metrics
 
 # -----------------------------------------------------------------------------
 # Queues to Monitor
@@ -38,25 +46,12 @@ monitored_queues:
   - notifications
 
 # -----------------------------------------------------------------------------
-# Alert Thresholds
-# Adjust according to your system's normal behavior
+# Thresholds (for local logging - actual alerting is configured in dashboard)
 # -----------------------------------------------------------------------------
 thresholds:
-  # Maximum pending tasks before alerting
   max_queue_size: 1000
-  
-  # Maximum time (seconds) a task can wait in queue
-  # This is the most important metric for the business
   max_wait_time_seconds: 60
-  
-  # Maximum time (seconds) a task can be running
-  # Tasks exceeding this are marked as "zombies"
   max_task_runtime_seconds: 1800  # 30 minutes
-  
-  # Maximum time without heartbeat from a worker
-  worker_heartbeat_timeout_seconds: 120
-  
-  # Critical queues that receive higher severity alerts
   critical_queues:
     - payments
     - emails
