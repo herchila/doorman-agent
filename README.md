@@ -4,10 +4,22 @@
 
 Doorman Agent collects metrics from your Celery workers and Redis queues, then sends them to [doorman.com](https://doorman.com) for analysis and alerting.
 
+## Requirements
+
+- Python 3.10+
+- Redis
+- Celery
+
 ## Installation
 
 ```bash
 pip install doorman-agent
+```
+
+For better Redis performance:
+
+```bash
+pip install doorman-agent[performance]  # includes hiredis
 ```
 
 ## Quick Start
@@ -136,6 +148,23 @@ The agent is designed with privacy in mind:
 - Worker hostnames are hashed (`celery@prod-worker-1` → `w-a1b2c3d4`)
 - Queue names are sanitized (emails/UUIDs redacted)
 - Task arguments are **never** collected
+
+## Development
+
+```bash
+# Clone the repository
+git clone https://github.com/doorman/doorman-agent.git
+cd doorman-agent
+
+# Install with dev dependencies
+poetry install --with dev
+
+# Run linting and type checking
+pre-commit run --all-files
+
+# Run tests
+poetry run pytest
+```
 
 ## License
 
