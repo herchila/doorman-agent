@@ -28,8 +28,8 @@ class Config(BaseModel):
     local_mode: bool = False
 
     # Local connections (for metrics collection)
-    redis_url: str = "redis://redis:6379/0"
-    celery_broker_url: str = "redis://redis:6379/0"
+    redis_url: str = "redis://localhost:6379/0"
+    celery_broker_url: str = "redis://localhost:6379/0"
     celery_app_name: str = "tasks"
 
     # Behavior

@@ -10,7 +10,7 @@
 # Production mode:
 #   docker run -d --name doorman \
 #     --network your-project_default \
-#     -e REDIS_URL=redis://redis:6379/0 \
+#     -e REDIS_URL=redis://localhost:6379/0 \
 #     -e SLACK_WEBHOOK_URL=https://hooks.slack.com/... \
 #     celery-doorman --config config.yaml
 # =============================================================================

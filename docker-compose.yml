@@ -24,8 +24,8 @@ services:
       - ./config.yaml:/app/config.yaml:ro
     environment:
       # These are used in production mode (ignored in simulation)
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
+      - REDIS_URL=redis://localhost:6379/0
+      - CELERY_BROKER_URL=redis://localhost:6379/0
       # Uncomment to enable notifications
       # - SLACK_WEBHOOK_URL=https://hooks.slack.com/services/XXX/YYY/ZZZ
     command: ["--simulate", "--workers", "1"]  # Default: run in simulation mode with 1 worker

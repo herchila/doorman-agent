@@ -54,8 +54,8 @@ api_url: "https://api.doorman.com"
 local_mode: false
 
 # Redis/Celery
-redis_url: "redis://redis:6379/0"
-celery_broker_url: "redis://redis:6379/0"
+redis_url: "redis://localhost:6379/0"
+celery_broker_url: "redis://localhost:6379/0"
 
 # Behavior
 check_interval_seconds: 30
@@ -74,8 +74,8 @@ monitored_queues:
 | `DOORMAN_API_KEY` | Your doorman.com API key | Required (API mode) |
 | `DOORMAN_API_URL` | API endpoint | `https://api.doorman.com` |
 | `DOORMAN_LOCAL_MODE` | Set to `true` for local mode | `false` |
-| `REDIS_URL` | Redis connection URL | `redis://redis:6379/0` |
-| `CELERY_BROKER_URL` | Celery broker URL | `redis://redis:6379/0` |
+| `REDIS_URL` | Redis connection URL | `redis://localhost:6379/0` |
+| `CELERY_BROKER_URL` | Celery broker URL | `redis://localhost:6379/0` |
 | `CHECK_INTERVAL` | Seconds between checks | `30` |
 
 ## CLI Options

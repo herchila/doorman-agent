@@ -24,8 +24,8 @@ local_mode: false
 # -----------------------------------------------------------------------------
 # Redis/Celery Connections
 # -----------------------------------------------------------------------------
-redis_url: "redis://redis:6379/0"
-celery_broker_url: "redis://redis:6379/0"
+redis_url: "redis://localhost:6379/0"
+celery_broker_url: "redis://localhost:6379/0"
 celery_app_name: "tasks"
 
 # -----------------------------------------------------------------------------
