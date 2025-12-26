@@ -3,6 +3,7 @@ Configuration loading for Doorman Agent
 """
 
 import os
+from typing import Optional
 
 from doorman_agent.models import AlertThresholds, Config
 
@@ -16,7 +17,7 @@ except ImportError:
     YAML_AVAILABLE = False
 
 
-def load_config(config_path: str | None = None) -> Config:
+def load_config(config_path: Optional[str] = None) -> Config:
     """Loads configuration from YAML file or environment variables"""
     config_data: dict = {}
 

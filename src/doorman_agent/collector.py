@@ -5,7 +5,7 @@ Metrics collector for Redis and Celery
 import json
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from doorman_agent.logger import StructuredLogger
 from doorman_agent.models import Config, QueueMetrics, SystemMetrics, WorkerMetrics
@@ -31,11 +31,11 @@ except ImportError:
 class MetricsCollector:
     """Collects metrics from Redis and Celery"""
 
-    def __init__(self, config: Config, logger: StructuredLogger | None = None):
+    def __init__(self, config: Config, logger: Optional[StructuredLogger] = None):
         self.config = config
         self.logger = logger or StructuredLogger("doorman-collector")
-        self.redis_client: Any | None = None
-        self.celery_app: Any | None = None
+        self.redis_client: Optional[Any] = None
+        self.celery_app: Optional[Any] = None
 
     def connect(self) -> bool:
         """Establishes connections with Redis and Celery"""
@@ -90,7 +90,7 @@ class MetricsCollector:
             self.logger.error("Failed to get queue depth", queue=queue_name, error=str(e))
             return 0
 
-    def get_oldest_task_age(self, queue_name: str) -> float | None:
+    def get_oldest_task_age(self, queue_name: str) -> Optional[float]:
         """Estimates the age of the oldest task in the queue"""
         if not self.redis_client:
             return None

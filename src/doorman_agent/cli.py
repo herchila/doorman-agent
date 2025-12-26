@@ -2,6 +2,8 @@
 Command-line interface for Doorman Agent
 """
 
+from __future__ import annotations
+
 import argparse
 import sys
 

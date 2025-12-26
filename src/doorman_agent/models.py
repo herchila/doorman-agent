@@ -2,7 +2,7 @@
 Data models for Doorman Agent
 """
 
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -21,7 +21,7 @@ class Config(BaseModel):
     """Complete Doorman configuration"""
 
     # API Connection (required for production)
-    api_key: str | None = None
+    api_key: Optional[str] = None
     api_url: str = "https://api.doorman.com"
 
     # Local mode: skip API, only log metrics
@@ -49,7 +49,7 @@ class QueueMetrics(BaseModel):
 
     name: str
     depth: int = 0
-    oldest_task_age_seconds: float | None = None
+    oldest_task_age_seconds: Optional[float] = None
 
 
 class WorkerMetrics(BaseModel):
@@ -57,7 +57,7 @@ class WorkerMetrics(BaseModel):
 
     name: str
     active_tasks: int = 0
-    last_heartbeat: str | None = None
+    last_heartbeat: Optional[str] = None
     is_alive: bool = True
 
 
