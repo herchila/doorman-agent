@@ -24,8 +24,8 @@ local_mode: false
 # -----------------------------------------------------------------------------
 # Redis/Celery Connections
 # -----------------------------------------------------------------------------
-redis_url: "redis://localhost:6379/0"
-celery_broker_url: "redis://localhost:6379/0"
+redis_url: "redis://redis:6379/0"
+celery_broker_url: "redis://redis:6379/0"
 celery_app_name: "tasks"
 
 # -----------------------------------------------------------------------------
@@ -42,7 +42,6 @@ monitored_queues:
   - default
   - priority
   - emails
-  - payments
   - notifications
 
 # -----------------------------------------------------------------------------
@@ -53,6 +52,5 @@ thresholds:
   max_wait_time_seconds: 60
   max_task_runtime_seconds: 1800  # 30 minutes
   critical_queues:
-    - payments
     - emails
     - notifications

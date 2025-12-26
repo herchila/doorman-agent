@@ -34,14 +34,14 @@ def load_config(config_path: Optional[str] = None) -> Config:
                 "api_key": yaml_config.get("api_key"),
                 "api_url": yaml_config.get("api_url", "https://api.doorman.com"),
                 "local_mode": yaml_config.get("local_mode", False),
-                "redis_url": yaml_config.get("redis_url", "redis://localhost:6379/0"),
+                "redis_url": yaml_config.get("redis_url", "redis://redis:6379/0"),
                 "celery_broker_url": yaml_config.get(
-                    "celery_broker_url", "redis://localhost:6379/0"
+                    "celery_broker_url", "redis://redis:6379/0"
                 ),
                 "celery_app_name": yaml_config.get("celery_app_name", "tasks"),
                 "check_interval_seconds": yaml_config.get("check_interval_seconds", 30),
                 "monitored_queues": yaml_config.get(
-                    "monitored_queues", ["celery", "default", "priority", "emails", "payments"]
+                    "monitored_queues", ["celery", "default", "priority", "emails"]
                 ),
             }
 
@@ -52,7 +52,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
                     max_queue_size=t.get("max_queue_size", 1000),
                     max_wait_time_seconds=t.get("max_wait_time_seconds", 60),
                     max_task_runtime_seconds=t.get("max_task_runtime_seconds", 1800),
-                    critical_queues=t.get("critical_queues", ["payments", "emails"]),
+                    critical_queues=t.get("critical_queues", ["emails"]),
                 )
 
     # Environment variables override file

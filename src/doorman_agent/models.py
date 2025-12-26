@@ -14,7 +14,7 @@ class AlertThresholds(BaseModel):
     max_wait_time_seconds: int = 60
     max_task_runtime_seconds: int = 1800  # 30 minutes
     worker_heartbeat_timeout_seconds: int = 120
-    critical_queues: list[str] = Field(default_factory=lambda: ["payments", "emails", "celery"])
+    critical_queues: list[str] = Field(default_factory=lambda: ["emails", "celery"])
 
 
 class Config(BaseModel):
@@ -28,8 +28,8 @@ class Config(BaseModel):
     local_mode: bool = False
 
     # Local connections (for metrics collection)
-    redis_url: str = "redis://localhost:6379/0"
-    celery_broker_url: str = "redis://localhost:6379/0"
+    redis_url: str = "redis://redis:6379/0"
+    celery_broker_url: str = "redis://redis:6379/0"
     celery_app_name: str = "tasks"
 
     # Behavior
@@ -40,7 +40,7 @@ class Config(BaseModel):
 
     # Queues to monitor (empty = all)
     monitored_queues: list[str] = Field(
-        default_factory=lambda: ["celery", "default", "priority", "emails", "payments"]
+        default_factory=lambda: ["celery", "default", "priority", "emails"]
     )
 
 
