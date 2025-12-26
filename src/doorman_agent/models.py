@@ -2,7 +2,7 @@
 Data models for Doorman Agent
 """
 
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -14,14 +14,14 @@ class AlertThresholds(BaseModel):
     max_wait_time_seconds: int = 60
     max_task_runtime_seconds: int = 1800  # 30 minutes
     worker_heartbeat_timeout_seconds: int = 120
-    critical_queues: list[str] = Field(default_factory=lambda: ["payments", "emails", "celery"])
+    critical_queues: list[str] = Field(default_factory=lambda: ["emails", "celery"])
 
 
 class Config(BaseModel):
     """Complete Doorman configuration"""
 
     # API Connection (required for production)
-    api_key: str | None = None
+    api_key: Optional[str] = None
     api_url: str = "https://api.doorman.com"
 
     # Local mode: skip API, only log metrics
@@ -40,7 +40,7 @@ class Config(BaseModel):
 
     # Queues to monitor (empty = all)
     monitored_queues: list[str] = Field(
-        default_factory=lambda: ["celery", "default", "priority", "emails", "payments"]
+        default_factory=lambda: ["celery", "default", "priority", "emails"]
     )
 
 
@@ -49,7 +49,7 @@ class QueueMetrics(BaseModel):
 
     name: str
     depth: int = 0
-    oldest_task_age_seconds: float | None = None
+    oldest_task_age_seconds: Optional[float] = None
 
 
 class WorkerMetrics(BaseModel):
@@ -57,7 +57,7 @@ class WorkerMetrics(BaseModel):
 
     name: str
     active_tasks: int = 0
-    last_heartbeat: str | None = None
+    last_heartbeat: Optional[str] = None
     is_alive: bool = True
 
 

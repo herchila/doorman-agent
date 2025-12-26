@@ -6,7 +6,7 @@ import json
 import os
 import sys
 import time
-from typing import Any
+from typing import Any, Optional
 
 from doorman_agent.logger import StructuredLogger
 from doorman_agent.models import Config
@@ -30,10 +30,10 @@ class SimulationEnvironment:
     def __init__(self, num_workers: int, logger: StructuredLogger):
         self.num_workers = num_workers
         self.logger = logger
-        self.redis_process: Any | None = None
+        self.redis_process: Optional[Any] = None
         self.worker_processes: list[Any] = []
         self.redis_port = 6399  # Non-standard port to avoid conflicts
-        self.temp_dir: str | None = None
+        self.temp_dir: Optional[str] = None
 
     def _check_redis_server(self) -> bool:
         """Check if redis-server is available"""
@@ -142,7 +142,7 @@ def zombie_task():
             self.logger.info("No workers requested (simulating workers down scenario)")
             return True
 
-        app_file = self._create_celery_app_file()
+        self._create_celery_app_file()
 
         try:
             for i in range(self.num_workers):
@@ -234,20 +234,20 @@ def zombie_task():
             try:
                 process.terminate()
                 process.wait(timeout=5)
-            except:
+            except Exception:
                 try:
                     process.kill()
-                except:
+                except Exception:
                     pass
 
         if self.redis_process:
             try:
                 self.redis_process.terminate()
                 self.redis_process.wait(timeout=5)
-            except:
+            except Exception:
                 try:
                     self.redis_process.kill()
-                except:
+                except Exception:
                     pass
 
         if self.temp_dir and os.path.exists(self.temp_dir):

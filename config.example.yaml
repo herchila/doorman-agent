@@ -42,7 +42,6 @@ monitored_queues:
   - default
   - priority
   - emails
-  - payments
   - notifications
 
 # -----------------------------------------------------------------------------
@@ -53,6 +52,5 @@ thresholds:
   max_wait_time_seconds: 60
   max_task_runtime_seconds: 1800  # 30 minutes
   critical_queues:
-    - payments
     - emails
     - notifications

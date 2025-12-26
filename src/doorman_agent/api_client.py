@@ -11,7 +11,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from doorman_agent.logger import StructuredLogger
 from doorman_agent.models import SystemMetrics
@@ -29,7 +29,7 @@ class APIClient:
     DEFAULT_API_URL = "https://api.doorman.com"
 
     def __init__(
-        self, api_key: str, api_url: str | None = None, logger: StructuredLogger | None = None
+        self, api_key: str, api_url: Optional[str] = None, logger: Optional[StructuredLogger] = None
     ):
         self.api_key = api_key
         self.api_url = (api_url or self.DEFAULT_API_URL).rstrip("/")
@@ -82,8 +82,8 @@ class APIClient:
         }
 
     def _make_request(
-        self, method: str, endpoint: str, payload: dict | None = None
-    ) -> tuple[bool, dict | None]:
+        self, method: str, endpoint: str, payload: Optional[dict] = None
+    ) -> tuple[bool, Optional[dict]]:
         """Makes HTTP request to the API"""
         url = f"{self.api_url}{endpoint}"
 

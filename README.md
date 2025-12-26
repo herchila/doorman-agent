@@ -6,7 +6,7 @@ Doorman Agent collects metrics from your Celery workers and Redis queues, then s
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.9+
 - Redis
 - Celery
 
@@ -65,7 +65,6 @@ monitored_queues:
   - celery
   - default
   - emails
-  - payments
 ```
 
 ## Environment Variables

@@ -5,6 +5,7 @@ Main Doorman Agent class
 import signal
 import sys
 import time
+from typing import Optional
 
 from doorman_agent.api_client import AGENT_VERSION, APIClient
 from doorman_agent.collector import MetricsCollector
@@ -24,10 +25,10 @@ class DoormanAgent:
         self.config = config
         self.logger = StructuredLogger("doorman-agent")
         self.collector = MetricsCollector(config, self.logger)
-        self.api_client: APIClient | None = None
         self.running = False
         self._consecutive_failures = 0
         self._max_consecutive_failures = 10
+        self.api_client: Optional[APIClient] = None
 
         # Initialize API client only if not in local mode and API key provided
         if not config.local_mode and config.api_key:
