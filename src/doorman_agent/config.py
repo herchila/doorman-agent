@@ -9,6 +9,8 @@ from typing import Optional
 
 from doorman_agent.models import AlertThresholds, Config, PrivacyConfig
 
+AGENT_VERSION = "0.1.0-alpha.2"
+
 # Optional YAML support
 try:
     import yaml

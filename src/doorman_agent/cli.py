@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from doorman_agent.api_client import AGENT_VERSION
+from doorman_agent.config import AGENT_VERSION
 
 
 def main():

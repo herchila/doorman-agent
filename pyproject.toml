@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "doorman-agent"
-version = "0.1.0"
+version = "0.1.0-alpha.2"
 description = "Lightweight monitoring agent for Celery/Redis queues"
 authors = ["Hernán Chilabert <hchilabert@gmail.com>"]
 readme = "README.md"
@@ -50,10 +50,10 @@ hiredis = ">=2.0.0"
 doorman-agent = "doorman_agent.cli:main"
 
 [tool.poetry.urls]
-Homepage = "https://doorman.com"
-Documentation = "https://docs.doorman.com"
-Repository = "https://github.com/doorman/doorman-agent"
-Issues = "https://github.com/doorman/doorman-agent/issues"
+Homepage = "https://github.com/herchila/doorman-agent"
+Documentation = "https://github.com/herchila/doorman-agent/blob/master/README.md"
+Repository = "https://github.com/herchila/doorman-agent"
+Issues = "https://github.com/herchila/doorman-agent/issues"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
