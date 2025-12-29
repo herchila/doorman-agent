@@ -2,6 +2,8 @@
 Main Doorman Agent class
 """
 
+from __future__ import annotations
+
 import signal
 import sys
 import time
@@ -60,17 +62,29 @@ class DoormanAgent:
                     "total_active": metrics.total_active_tasks,
                     "total_workers": metrics.total_workers,
                     "alive_workers": metrics.alive_workers,
+                    "total_concurrency": metrics.total_concurrency,
+                    "saturation_pct": round(metrics.saturation_pct, 2),
+                    "max_latency_sec": metrics.max_latency_sec,
                 },
                 "infra_health": {
                     "redis": metrics.redis_connected,
                     "celery": metrics.celery_connected,
                 },
                 "queues": [
-                    {"name": q.name, "depth": q.depth, "latency_sec": q.oldest_task_age_seconds}
+                    {
+                        "name": q.name,
+                        "depth": q.depth,
+                        "latency_sec": q.oldest_task_age_seconds,
+                    }
                     for q in metrics.queues
                 ],
                 "workers": [
-                    {"name": w.name, "active_tasks": w.active_tasks, "is_alive": w.is_alive}
+                    {
+                        "name": w.name,
+                        "active_tasks": w.active_tasks,
+                        "concurrency": w.concurrency,
+                        "is_alive": w.is_alive,
+                    }
                     for w in metrics.workers
                 ],
                 "anomalies": metrics.stuck_tasks,
@@ -89,6 +103,8 @@ class DoormanAgent:
             active_tasks=metrics.total_active_tasks,
             alive_workers=metrics.alive_workers,
             total_workers=metrics.total_workers,
+            saturation_pct=round(metrics.saturation_pct, 2),
+            max_latency_sec=metrics.max_latency_sec,
             redis_connected=metrics.redis_connected,
             celery_connected=metrics.celery_connected,
             stuck_tasks_count=len(metrics.stuck_tasks),
@@ -124,12 +140,12 @@ class DoormanAgent:
         """Runs the main agent loop"""
         mode = "local" if self.config.local_mode else "api"
 
+        # Log startup banner first
         self.logger.info(
             "Doorman Agent starting",
             version=AGENT_VERSION,
             mode=mode,
             check_interval=self.config.check_interval_seconds,
-            monitored_queues=self.config.monitored_queues,
             api_url=self.config.api_url if not self.config.local_mode else "disabled",
         )
 
@@ -143,10 +159,14 @@ class DoormanAgent:
         elif self.config.local_mode:
             self.logger.info("Running in LOCAL MODE - metrics will be logged, not sent to API")
 
-        # Connect to Redis/Celery
+        # Connect to Redis/Celery (only here)
         if not self.collector.connect():
             self.logger.error("Failed to establish connections, exiting")
             sys.exit(1)
+
+        # Log monitored queues after connection (may be auto-discovered)
+        queues = self.collector.get_queues_to_monitor()
+        self.logger.info("Monitoring queues", queues=queues)
 
         self.setup_signal_handlers()
         self.running = True

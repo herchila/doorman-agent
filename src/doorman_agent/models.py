@@ -19,6 +19,14 @@ class AlertThresholds(BaseModel):
     critical_queues: list[str] = Field(default_factory=list)  # empty = none critical
 
 
+class PrivacyConfig(BaseModel):
+    """Privacy-related configuration"""
+
+    # If True, task signatures are sanitized (e.g., "app.tasks.process_user_123" -> "app.tasks.process_user_[id]")
+    # If False, task signatures are sent as-is (use only if you're sure they don't contain PII)
+    sanitize_task_signatures: bool = True
+
+
 class Config(BaseModel):
     """Complete Doorman configuration"""
 
@@ -40,6 +48,9 @@ class Config(BaseModel):
     # Thresholds (used locally for logging, API does the actual alerting)
     thresholds: AlertThresholds = Field(default_factory=AlertThresholds)
 
+    # Privacy settings
+    privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
+
     # Queues to monitor (empty = auto-discover from Celery workers)
     monitored_queues: list[str] = Field(default_factory=list)
 
@@ -57,6 +68,7 @@ class WorkerMetrics(BaseModel):
 
     name: str
     active_tasks: int = 0
+    concurrency: int = 0  # max-concurrency from pool
     last_heartbeat: Optional[str] = None
     is_alive: bool = True
 
@@ -69,6 +81,9 @@ class SystemMetrics(BaseModel):
     total_active_tasks: int = 0
     total_workers: int = 0
     alive_workers: int = 0
+    total_concurrency: int = 0  # sum of all workers' max-concurrency
+    saturation_pct: float = 0.0  # (active_tasks / total_concurrency) * 100
+    max_latency_sec: Optional[float] = None  # oldest task age across all queues
     queues: list[QueueMetrics] = Field(default_factory=list)
     workers: list[WorkerMetrics] = Field(default_factory=list)
     stuck_tasks: list[dict[str, Any]] = Field(default_factory=list)

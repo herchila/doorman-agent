@@ -79,15 +79,6 @@ Get your API key at: https://doorman.com/dashboard/api-keys
 
     args = parser.parse_args()
 
-    # Check for redis/celery dependencies
-    # try:
-    #     import celery
-    #     import redis
-    # except ImportError as e:
-    #     print(f"\n❌ Missing dependency: {e}")
-    #     print("   Install with: pip install redis celery")
-    #     sys.exit(1)
-
     # Simulation mode
     if args.simulate:
         from doorman_agent.simulator import run_simulation
@@ -95,7 +86,7 @@ Get your API key at: https://doorman.com/dashboard/api-keys
         run_simulation(args.workers, args.enqueue)
         return
 
-    # Import after dependency check
+    # Import after arg parsing
     from doorman_agent.agent import DoormanAgent
     from doorman_agent.config import load_config
 
@@ -117,16 +108,18 @@ Get your API key at: https://doorman.com/dashboard/api-keys
         print("   Get your API key at: https://doorman.com/dashboard/api-keys\n")
         sys.exit(1)
 
-    # Create and run agent
+    # Create agent
     agent = DoormanAgent(config)
 
-    if not agent.collector.connect():
-        print("❌ Could not connect to Redis/Celery")
-        sys.exit(1)
-
+    # Run (connection happens inside run/check_once)
     if args.once:
+        # For --once mode, we need to connect first
+        if not agent.collector.connect():
+            print("❌ Could not connect to Redis/Celery")
+            sys.exit(1)
         agent.check_once()
     else:
+        # run() handles connection internally
         agent.run()
 
 

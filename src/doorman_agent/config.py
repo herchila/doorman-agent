@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from doorman_agent.models import AlertThresholds, Config
+from doorman_agent.models import AlertThresholds, Config, PrivacyConfig
 
 # Optional YAML support
 try:
@@ -61,6 +61,14 @@ def load_config(config_path: Optional[str] = None) -> Config:
                     threshold_data["critical_queues"] = t["critical_queues"]
                 config_data["thresholds"] = AlertThresholds(**threshold_data)
 
+            # Handle privacy settings
+            if "privacy" in yaml_config:
+                p = yaml_config["privacy"]
+                privacy_data = {}
+                if "sanitize_task_signatures" in p:
+                    privacy_data["sanitize_task_signatures"] = p["sanitize_task_signatures"]
+                config_data["privacy"] = PrivacyConfig(**privacy_data)
+
     # Environment variables override file
     if os.environ.get("DOORMAN_API_KEY"):
         config_data["api_key"] = os.environ["DOORMAN_API_KEY"]
@@ -78,6 +86,11 @@ def load_config(config_path: Optional[str] = None) -> Config:
 
     if os.environ.get("CHECK_INTERVAL"):
         config_data["check_interval_seconds"] = int(os.environ["CHECK_INTERVAL"])
+
+    # Privacy settings from env
+    sanitize_env = os.environ.get("DOORMAN_SANITIZE_TASK_SIGNATURES", "").lower()
+    if sanitize_env in ("false", "0", "no"):
+        config_data["privacy"] = PrivacyConfig(sanitize_task_signatures=False)
 
     # Create and validate config with Pydantic
     return Config(**{k: v for k, v in config_data.items() if v is not None})

@@ -220,6 +220,9 @@ class MetricsCollector:
         # Get queues to monitor (configured or auto-discovered)
         queues_to_monitor = self.get_queues_to_monitor()
 
+        # Track max latency across all queues
+        max_latency: Optional[float] = None
+
         # Collect queue metrics
         for queue_name in queues_to_monitor:
             depth = self.get_queue_depth(queue_name)
@@ -231,6 +234,13 @@ class MetricsCollector:
             metrics.queues.append(queue_metrics)
             metrics.total_pending_tasks += depth
 
+            # Track max latency
+            if oldest_age is not None:
+                if max_latency is None or oldest_age > max_latency:
+                    max_latency = oldest_age
+
+        metrics.max_latency_sec = max_latency
+
         # Collect worker metrics
         active, reserved, stats = self.get_worker_stats()
 
@@ -240,11 +250,22 @@ class MetricsCollector:
         all_workers = set(active.keys()) | set(reserved.keys()) | set(stats.keys())
         metrics.total_workers = len(all_workers)
 
+        total_concurrency = 0
+
         for worker_name in all_workers:
             worker_active = active.get(worker_name, [])
+            worker_stats = stats.get(worker_name, {})
+
+            # Get concurrency from pool stats
+            pool_info = worker_stats.get("pool", {})
+            worker_concurrency = pool_info.get("max-concurrency", 0)
+            total_concurrency += worker_concurrency
 
             worker_metrics = WorkerMetrics(
-                name=worker_name, active_tasks=len(worker_active), is_alive=worker_name in stats
+                name=worker_name,
+                active_tasks=len(worker_active),
+                concurrency=worker_concurrency,
+                is_alive=worker_name in stats,
             )
             metrics.workers.append(worker_metrics)
 
@@ -271,5 +292,12 @@ class MetricsCollector:
                                     ).isoformat(),
                                 }
                             )
+
+        # Calculate saturation percentage
+        metrics.total_concurrency = total_concurrency
+        if total_concurrency > 0:
+            metrics.saturation_pct = (metrics.total_active_tasks / total_concurrency) * 100
+        else:
+            metrics.saturation_pct = 0.0
 
         return metrics

@@ -1,0 +1,84 @@
+{
+    "timestamp": "2025-12-29T15:30:45.123456+00:00",
+    "agent_version": "0.1.0",
+    "agent_session": "a1b2c3d4e5f67890",
+    "metrics": {
+        "total_pending": 1250,
+        "total_active": 12,
+        "total_workers": 4,
+        "alive_workers": 3,
+        "total_concurrency": 16,
+        "saturation_pct": 75.0,
+        "max_latency_sec": 125.7
+    },
+    "infra_health": {
+        "redis": true,
+        "celery": true
+    },
+    "queues": [
+        {
+            "name": "celery",
+            "depth": 800,
+            "latency_sec": 125.7
+        },
+        {
+            "name": "emails",
+            "depth": 350,
+            "latency_sec": 45.2
+        },
+        {
+            "name": "notifications",
+            "depth": 100,
+            "latency_sec": 12.0
+        },
+        {
+            "name": "reports",
+            "depth": 0,
+            "latency_sec": null
+        }
+    ],
+    "workers": [
+        {
+            "id_hash": "w-a1b2c3d4",
+            "display_name": "worker-1",
+            "active_tasks": 4,
+            "concurrency": 4,
+            "status": "online"
+        },
+        {
+            "id_hash": "w-e5f6g7h8",
+            "display_name": "worker-2",
+            "active_tasks": 4,
+            "concurrency": 4,
+            "status": "online"
+        },
+        {
+            "id_hash": "w-i9j0k1l2",
+            "display_name": "worker-3",
+            "active_tasks": 4,
+            "concurrency": 4,
+            "status": "stuck"
+        },
+        {
+            "id_hash": "w-m3n4o5p6",
+            "display_name": "worker-4",
+            "active_tasks": 0,
+            "concurrency": 4,
+            "status": "offline"
+        }
+    ],
+    "anomalies": [
+        {
+            "type": "stuck_task",
+            "task_id_hash": "t-8f3a2b1c4d5e",
+            "task_signature": "app.tasks.generate_monthly_report",
+            "worker_ref": "w-i9j0k1l2",
+            "duration_sec": 2847.5,
+            "started_at": "2025-12-29T14:43:17.654321+00:00",
+            "detected_at": "2025-12-29T15:30:45.123456+00:00"
+        }
+    ],
+    "privacy": {
+        "args_accessed": false
+    }
+}

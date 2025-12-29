@@ -1,170 +1,254 @@
 # 🚪 Doorman Agent
 
-**Lightweight monitoring agent for Celery/Redis queues.**
+**Privacy-first monitoring for Celery + Redis.** Zero PII exposure. One-line install.
 
-Doorman Agent collects metrics from your Celery workers and Redis queues, then sends them to [doorman.com](https://doorman.com) for analysis and alerting.
+```bash
+pip install doorman-agent && doorman-agent --local
+```
 
-## Requirements
+That's it. You're monitoring.
 
-- Python 3.9+
-- Redis
-- Celery
+---
 
-## Installation
+## Why Doorman?
+
+Your Celery workers are critical infrastructure. When they fail silently—stuck tasks, dead workers, growing queues—you find out from angry users, not your monitoring.
+
+**Doorman fixes this.** Proactive alerts before users notice.
+
+| Problem | Doorman Solution |
+|---------|------------------|
+| Worker dies but process stays alive | Detects zombie workers via heartbeat |
+| Queue grows silently | Alerts on depth + latency thresholds |
+| Task stuck for 2 hours | Flags anomalies with `stuck_task` alerts |
+| "Is it my code or infra?" | `saturation_pct` tells you instantly |
+
+---
+
+## 🔒 Privacy by Design
+
+**We never see your data.** The agent collects metrics only—task arguments and results are never accessed.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    YOUR INFRASTRUCTURE                       │
+│  ┌─────────┐    ┌─────────┐    ┌─────────────────────────┐  │
+│  │  Redis  │◄───│ Celery  │◄───│  doorman-agent          │  │
+│  │         │    │ Workers │    │  • Queue depth     ✓    │  │
+│  └─────────┘    └─────────┘    │  • Worker status   ✓    │  │
+│                                │  • Task latency    ✓    │  │
+│                                │  • Task args       ✗    │  │
+│                                │  • Task results    ✗    │  │
+│                                │  • Task kwargs     ✗    │  │
+│                                └───────────┬─────────────┘  │
+└────────────────────────────────────────────┼────────────────┘
+                                             │ HTTPS (metrics only)
+                                             ▼
+                                   ┌─────────────────┐
+                                   │  doorman.com    │
+                                   │  Analysis +     │
+                                   │  Alerts         │
+                                   └─────────────────┘
+```
+
+### What we collect vs. what we don't
+
+| ✅ Collected | ❌ Never Collected |
+|--------------|-------------------|
+| Queue names | Task arguments |
+| Queue depth | Task keyword arguments |
+| Task latency | Task results |
+| Worker count | Task payloads |
+| Worker status | Database queries |
+| Stuck task duration | User data |
+
+### PII Sanitization
+
+Even metadata is sanitized before leaving your infrastructure:
+
+| Data | Raw | Sent to API |
+|------|-----|-------------|
+| Worker hostname | `celery@prod-db-worker-1.internal` | `w-a1b2c3d4` (hashed) |
+| Task ID | `user-john@acme.com-12345` | `t-8f3a2b1c4d5e` (hashed) |
+| Task name | `process_user_98765` | `process_user_[id]` (sanitized) |
+| Queue name | `emails-john@acme.com` | `emails-[email]` (sanitized) |
+
+**Verify it yourself:**
+
+```bash
+# Run in local mode - see exactly what would be sent
+doorman-agent --local | jq '.payload'
+```
+
+---
+
+## Quick Start
+
+### 1. Install
 
 ```bash
 pip install doorman-agent
 ```
 
-For better Redis performance:
+### 2. Test locally (no API, no data sent anywhere)
 
 ```bash
-pip install doorman-agent[performance]  # includes hiredis
+REDIS_URL=redis://localhost:6379/0 doorman-agent --local
 ```
 
-## Quick Start
-
-### API Mode (Production)
+### 3. Connect to Doorman (when ready)
 
 ```bash
-# Set your API key
-export DOORMAN_API_KEY=your-api-key
-
-# Run the agent
-doorman-agent --config config.yaml
+export DOORMAN_API_KEY=your-api-key  # Get at doorman.com/dashboard
+doorman-agent
 ```
 
-### Local Mode (Testing)
-
-```bash
-# Run without API - metrics are logged to stdout
-doorman-agent --config config.yaml --local
-```
+---
 
 ## Configuration
 
-Create a `config.yaml` file:
-
-```yaml
-# API Connection
-api_key: null  # Use DOORMAN_API_KEY env var instead
-api_url: "https://api.doorman.com"
-
-# Local mode (no API calls, just logging)
-local_mode: false
-
-# Redis/Celery
-redis_url: "redis://localhost:6379/0"
-celery_broker_url: "redis://localhost:6379/0"
-
-# Behavior
-check_interval_seconds: 30
-
-# Queues to monitor
-monitored_queues:
-  - celery
-  - default
-  - emails
-```
-
-## Environment Variables
+### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DOORMAN_API_KEY` | Your doorman.com API key | Required (API mode) |
-| `DOORMAN_API_URL` | API endpoint | `https://api.doorman.com` |
-| `DOORMAN_LOCAL_MODE` | Set to `true` for local mode | `false` |
-| `REDIS_URL` | Redis connection URL | `redis://localhost:6379/0` |
-| `CELERY_BROKER_URL` | Celery broker URL | `redis://localhost:6379/0` |
+| `DOORMAN_API_KEY` | Your API key | Required (API mode) |
+| `REDIS_URL` | Redis connection | `redis://localhost:6379/0` |
+| `CELERY_BROKER_URL` | Celery broker | Same as REDIS_URL |
+| `DOORMAN_LOCAL_MODE` | `true` = no API calls | `false` |
 | `CHECK_INTERVAL` | Seconds between checks | `30` |
 
-## CLI Options
+### Config File (optional)
 
-```bash
-doorman-agent --help
+```yaml
+# doorman.yaml
+redis_url: redis://prod-redis:6379/1
+celery_broker_url: redis://prod-redis:6379/1
+check_interval_seconds: 15
 
-Options:
-  --config, -c    Path to YAML configuration file
-  --once, -1      Run only once (for testing)
-  --local, -l     Local mode: only log metrics, no API calls
-  --api-key, -k   Doorman API key
-  --api-url       Doorman API URL
-  --version, -v   Show version
+# Queues to monitor (empty = auto-discover)
+monitored_queues: []
+
+# Privacy settings
+privacy:
+  sanitize_task_signatures: true  # default: true
+
+# Alert thresholds (used by API)
+thresholds:
+  max_queue_size: 1000
+  max_wait_time_seconds: 60
+  max_task_runtime_seconds: 1800
 ```
 
-## Output Modes
+```bash
+doorman-agent --config doorman.yaml
+```
 
-### API Mode
-Metrics are sent to doorman.com where they're analyzed and alerts are triggered based on your configured thresholds.
+---
 
-### Local Mode (`--local`)
-Metrics are logged as structured JSON to stdout. Perfect for:
-- Testing the agent before connecting to API
-- Analyzing metrics locally
-- Piping to your own logging system
+## Key Metrics
 
-Example local mode output:
+### `saturation_pct` — The metric that matters
+
+```
+saturation_pct = (active_tasks / total_concurrency) × 100
+```
+
+| Saturation | Queue Depth | Diagnosis |
+|------------|-------------|-----------|
+| 🔴 >90% | Growing | **Need more workers** |
+| 🟢 <30% | Growing | **Ghost workers** (network/config issue) |
+| 🟢 <30% | Stable ~0 | **Healthy** |
+
+### Full metrics payload
+
 ```json
 {
-  "timestamp": "2025-12-17T10:30:00Z",
-  "level": "INFO",
-  "message": "metrics_collected",
-  "mode": "local",
-  "payload": {
-    "metrics": {
-      "total_pending": 150,
-      "total_active": 8,
-      "total_workers": 4,
-      "alive_workers": 4
-    },
-    "infra_health": {
-      "redis": true,
-      "celery": true
-    },
-    "queues": [...],
-    "workers": [...],
-    "anomalies": []
+  "metrics": {
+    "total_pending": 1250,
+    "total_active": 12,
+    "saturation_pct": 75.0,
+    "max_latency_sec": 125.7,
+    "alive_workers": 3,
+    "total_workers": 4
+  },
+  "queues": [
+    {"name": "celery", "depth": 800, "latency_sec": 125.7}
+  ],
+  "workers": [
+    {"id_hash": "w-a1b2c3d4", "status": "online", "concurrency": 4}
+  ],
+  "anomalies": [
+    {"type": "stuck_task", "task_id_hash": "t-8f3a2b1c", "duration_sec": 2847}
+  ],
+  "privacy": {
+    "args_accessed": false
   }
 }
 ```
 
-## Metrics Collected
+---
 
-| Metric | Description |
-|--------|-------------|
-| `total_pending` | Total tasks waiting in all queues |
-| `total_active` | Tasks currently being processed |
-| `total_workers` | Registered Celery workers |
-| `alive_workers` | Workers responding to ping |
-| `queues[].depth` | Pending tasks per queue |
-| `queues[].latency_sec` | Age of oldest task in queue |
-| `workers[].status` | online, offline, stuck |
-| `anomalies[]` | Stuck tasks (>30 min runtime) |
-
-## Privacy
-
-The agent is designed with privacy in mind:
-- Worker hostnames are hashed (`celery@prod-worker-1` → `w-a1b2c3d4`)
-- Queue names are sanitized (emails/UUIDs redacted)
-- Task arguments are **never** collected
-
-## Development
+## CLI Reference
 
 ```bash
-# Clone the repository
-git clone https://github.com/doorman/doorman-agent.git
-cd doorman-agent
+# Run continuously (production)
+doorman-agent --config doorman.yaml
 
-# Install with dev dependencies
-poetry install --with dev
+# Run once (testing/CI)
+doorman-agent --once --local
 
-# Run linting and type checking
-pre-commit run --all-files
+# See exactly what data is collected
+doorman-agent --local | jq '.'
 
-# Run tests
-poetry run pytest
+# Simulation mode (demo without real Redis/Celery)
+doorman-agent --simulate --workers 2
+doorman-agent --simulate --workers 0 --enqueue 50  # Simulate outage
 ```
+
+---
+
+## Security
+
+- **No inbound connections** — Agent pushes to API, never listens
+- **TLS only** — All API communication over HTTPS
+- **API key scoped** — Keys are project-specific, revocable
+- **No shell access** — Agent has no remote execution capability
+- **Auditable** — Run `--local` to inspect all collected data
+
+### Disabling task signature sanitization
+
+If your task names are guaranteed PII-free:
+
+```yaml
+privacy:
+  sanitize_task_signatures: false
+```
+
+Or via environment:
+
+```bash
+DOORMAN_SANITIZE_TASK_SIGNATURES=false doorman-agent
+```
+
+---
+
+## Requirements
+
+- Python 3.9+
+- Redis
+- Celery 5.2+
+
+<!-- ---
+
+## Support
+
+- 📖 Docs: [docs.doorman.com](https://docs.doorman.com)
+- 💬 Discord: [discord.gg/doorman](https://discord.gg/doorman)
+- 🐛 Issues: [GitHub Issues](https://github.com/doorman-io/doorman-agent/issues)
+- 📧 Security: security@doorman.com -->
+
+---
 
 ## License
 
-MIT
+Apache License 2.0 — See [LICENSE](LICENSE) for details.
