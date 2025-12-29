@@ -2,6 +2,8 @@
 Metrics collector for Redis and Celery
 """
 
+from __future__ import annotations
+
 import json
 import time
 from datetime import datetime, timezone
@@ -36,6 +38,7 @@ class MetricsCollector:
         self.logger = logger or StructuredLogger("doorman-collector")
         self.redis_client: Optional[Any] = None
         self.celery_app: Optional[Any] = None
+        self._discovered_queues: list[str] = []
 
     def connect(self) -> bool:
         """Establishes connections with Redis and Celery"""
@@ -77,6 +80,61 @@ class MetricsCollector:
             success = False
 
         return success
+
+    def discover_queues(self) -> list[str]:
+        """
+        Auto-discover queues from Celery workers.
+        Returns list of queue names that workers are listening to.
+        """
+        queues: set[str] = set()
+
+        if not self.celery_app:
+            return list(queues)
+
+        try:
+            inspector = self.celery_app.control.inspect(timeout=5)
+            active_queues = inspector.active_queues() or {}
+
+            for worker_name, worker_queues in active_queues.items():
+                for queue_info in worker_queues:
+                    if isinstance(queue_info, dict):
+                        queue_name = queue_info.get("name")
+                        if queue_name:
+                            queues.add(queue_name)
+                    elif isinstance(queue_info, str):
+                        queues.add(queue_info)
+
+            if queues:
+                self.logger.info("Discovered queues from workers", queues=list(queues))
+            else:
+                self.logger.warning("No queues discovered from workers")
+
+        except Exception as e:
+            self.logger.error("Failed to discover queues", error=str(e))
+
+        return list(queues)
+
+    def get_queues_to_monitor(self) -> list[str]:
+        """
+        Returns the list of queues to monitor.
+        If monitored_queues is configured, use that.
+        Otherwise, auto-discover from workers.
+        """
+        if self.config.monitored_queues:
+            return self.config.monitored_queues
+
+        # Auto-discover if not configured
+        if not self._discovered_queues:
+            self._discovered_queues = self.discover_queues()
+
+        # Fallback to default "celery" queue if nothing discovered
+        if not self._discovered_queues:
+            self.logger.warning(
+                "No queues configured or discovered, using default 'celery' queue"
+            )
+            return ["celery"]
+
+        return self._discovered_queues
 
     def get_queue_depth(self, queue_name: str) -> int:
         """Gets the depth of a queue from Redis"""
@@ -159,8 +217,11 @@ class MetricsCollector:
             except Exception:
                 metrics.redis_connected = False
 
+        # Get queues to monitor (configured or auto-discovered)
+        queues_to_monitor = self.get_queues_to_monitor()
+
         # Collect queue metrics
-        for queue_name in self.config.monitored_queues:
+        for queue_name in queues_to_monitor:
             depth = self.get_queue_depth(queue_name)
             oldest_age = self.get_oldest_task_age(queue_name)
 
@@ -181,7 +242,6 @@ class MetricsCollector:
 
         for worker_name in all_workers:
             worker_active = active.get(worker_name, [])
-            # worker_stats = stats.get(worker_name, {})
 
             worker_metrics = WorkerMetrics(
                 name=worker_name, active_tasks=len(worker_active), is_alive=worker_name in stats

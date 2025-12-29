@@ -2,6 +2,8 @@
 Data models for Doorman Agent
 """
 
+from __future__ import annotations
+
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
@@ -14,7 +16,7 @@ class AlertThresholds(BaseModel):
     max_wait_time_seconds: int = 60
     max_task_runtime_seconds: int = 1800  # 30 minutes
     worker_heartbeat_timeout_seconds: int = 120
-    critical_queues: list[str] = Field(default_factory=lambda: ["emails", "celery"])
+    critical_queues: list[str] = Field(default_factory=list)  # empty = none critical
 
 
 class Config(BaseModel):
@@ -38,10 +40,8 @@ class Config(BaseModel):
     # Thresholds (used locally for logging, API does the actual alerting)
     thresholds: AlertThresholds = Field(default_factory=AlertThresholds)
 
-    # Queues to monitor (empty = all)
-    monitored_queues: list[str] = Field(
-        default_factory=lambda: ["celery", "default", "priority", "emails"]
-    )
+    # Queues to monitor (empty = auto-discover from Celery workers)
+    monitored_queues: list[str] = Field(default_factory=list)
 
 
 class QueueMetrics(BaseModel):

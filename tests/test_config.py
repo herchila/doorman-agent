@@ -66,7 +66,7 @@ class TestLoadConfigDefaults:
     def test_default_monitored_queues(self):
         """Default monitored queues should include common queue names"""
         config = load_config()
-        assert "celery" in config.monitored_queues
+        assert len(config.monitored_queues) == 0
         assert isinstance(config.monitored_queues, list)
 
     def test_default_thresholds(self):

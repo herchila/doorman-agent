@@ -2,6 +2,8 @@
 Configuration loading for Doorman Agent
 """
 
+from __future__ import annotations
+
 import os
 from typing import Optional
 
@@ -40,20 +42,24 @@ def load_config(config_path: Optional[str] = None) -> Config:
                 ),
                 "celery_app_name": yaml_config.get("celery_app_name", "tasks"),
                 "check_interval_seconds": yaml_config.get("check_interval_seconds", 30),
-                "monitored_queues": yaml_config.get(
-                    "monitored_queues", ["celery", "default", "priority", "emails"]
-                ),
             }
+
+            # Only set monitored_queues if explicitly configured
+            if "monitored_queues" in yaml_config:
+                config_data["monitored_queues"] = yaml_config["monitored_queues"]
 
             # Handle thresholds
             if "thresholds" in yaml_config:
                 t = yaml_config["thresholds"]
-                config_data["thresholds"] = AlertThresholds(
-                    max_queue_size=t.get("max_queue_size", 1000),
-                    max_wait_time_seconds=t.get("max_wait_time_seconds", 60),
-                    max_task_runtime_seconds=t.get("max_task_runtime_seconds", 1800),
-                    critical_queues=t.get("critical_queues", ["emails"]),
-                )
+                threshold_data = {
+                    "max_queue_size": t.get("max_queue_size", 1000),
+                    "max_wait_time_seconds": t.get("max_wait_time_seconds", 60),
+                    "max_task_runtime_seconds": t.get("max_task_runtime_seconds", 1800),
+                }
+                # Only set critical_queues if explicitly configured
+                if "critical_queues" in t:
+                    threshold_data["critical_queues"] = t["critical_queues"]
+                config_data["thresholds"] = AlertThresholds(**threshold_data)
 
     # Environment variables override file
     if os.environ.get("DOORMAN_API_KEY"):
