@@ -99,7 +99,7 @@ REDIS_URL=redis://localhost:6379/0 doorman-agent --local
 ### 3. Connect to Doorman (when ready)
 
 ```bash
-export DOORMAN_API_KEY=your-api-key  # Get at doorman.com/dashboard
+export DOORMAN_API_KEY=your-api-key  # Not ready yet
 doorman-agent
 ```
 
@@ -156,6 +156,7 @@ saturation_pct = (active_tasks / total_concurrency) × 100
 | Saturation | Queue Depth | Diagnosis |
 |------------|-------------|-----------|
 | 🔴 >90% | Growing | **Need more workers** |
+| 🟡 50-90% | Stable | **Normal** |
 | 🟢 <30% | Growing | **Ghost workers** (network/config issue) |
 | 🟢 <30% | Stable ~0 | **Healthy** |
 
@@ -238,16 +239,30 @@ DOORMAN_SANITIZE_TASK_SIGNATURES=false doorman-agent
 - Redis
 - Celery 5.2+
 
-<!-- ---
+---
 
-## Support
+## Alerts & Notifications
+
+The agent collects metrics. The Doorman API analyzes them and sends alerts.
+
+**Planned integrations:**
+- Slack
+- PagerDuty
+- Email
+- Webhooks
+
+> ⚠️ **Alpha Notice:** Doorman is currently in alpha. The API and dashboard at doorman.com are not yet publicly available. <!-- [Join the waitlist](https://doorman.com) to get early access. -->
+
+---
+
+<!-- ## Support
 
 - 📖 Docs: [docs.doorman.com](https://docs.doorman.com)
 - 💬 Discord: [discord.gg/doorman](https://discord.gg/doorman)
 - 🐛 Issues: [GitHub Issues](https://github.com/doorman-io/doorman-agent/issues)
-- 📧 Security: security@doorman.com -->
+- 📧 Security: security@doorman.com
 
----
+--- -->
 
 ## License
 
