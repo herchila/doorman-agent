@@ -1,24 +1,24 @@
 [tool.poetry]
 name = "doorman-agent"
-version = "0.1.0-alpha.2"
-description = "Lightweight monitoring agent for Celery/Redis queues"
+version = "0.1.0a3"
+description = "Privacy-first monitoring agent for Celery + Redis"
 authors = ["Hernán Chilabert <hchilabert@gmail.com>"]
 readme = "README.md"
-license = "MIT"
-keywords = ["celery", "redis", "monitoring", "alerting", "queue"]
+license = "Apache-2.0"
+repository = "https://github.com/herchila/doorman-agent"
+keywords = ["celery", "redis", "monitoring", "alerting", "observability"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
     "Topic :: System :: Monitoring",
     "Topic :: System :: Systems Administration",
 ]
@@ -30,6 +30,7 @@ redis = ">=4.0.0,<6.0.0"
 celery = ">=5.2.0,<6.0.0"
 pyyaml = ">=6.0"
 pydantic = ">=2.0.0,<3.0.0"
+rich = ">=13.0.0,<14.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0"
@@ -40,38 +41,42 @@ types-pyyaml = ">=6.0"
 types-redis = ">=4.0"
 pre-commit = ">=3.0"
 
-[tool.poetry.group.performance]
-optional = true
-
-[tool.poetry.group.performance.dependencies]
-hiredis = ">=2.0.0"
-
 [tool.poetry.scripts]
 doorman-agent = "doorman_agent.cli:main"
 
-[tool.poetry.urls]
-Homepage = "https://github.com/herchila/doorman-agent"
-Documentation = "https://github.com/herchila/doorman-agent/blob/master/README.md"
-Repository = "https://github.com/herchila/doorman-agent"
-Issues = "https://github.com/herchila/doorman-agent/issues"
-
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
+requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
-line-length = 100
 target-version = "py39"
+line-length = 100
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
 
-[tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP"]
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
 
 [tool.mypy]
 python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
+disallow_untyped_defs = true
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

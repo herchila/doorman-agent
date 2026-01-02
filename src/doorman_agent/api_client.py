@@ -2,7 +2,6 @@
 API Client for communicating with doorman.com
 """
 
-from doorman_agent.config import AGENT_VERSION
 from __future__ import annotations
 
 import hashlib
@@ -16,6 +15,7 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from doorman_agent.config import AGENT_VERSION
 from doorman_agent.logger import StructuredLogger
 from doorman_agent.models import Config, SystemMetrics
 

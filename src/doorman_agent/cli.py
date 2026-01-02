@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from doorman_agent.config import AGENT_VERSION
+from doorman_agent.api_client import AGENT_VERSION
 
 
 def main():
@@ -26,6 +26,14 @@ Examples:
 
   # Single check (for testing)
   doorman-agent --once --local
+
+  # Audit mode - one-time health check with formatted report
+  doorman-agent --audit
+  doorman-agent --audit --samples 3 --interval 10
+
+  # Deep audit - includes Redis/Celery configuration analysis
+  doorman-agent --audit --deep
+  doorman-agent --audit --config-check  # alias for --deep
 
 Simulation Mode (for demos/testing):
   doorman-agent --simulate --workers 1
@@ -59,6 +67,38 @@ Get your API key at: https://doorman.com/dashboard/api-keys
         "--version", "-v", action="version", version=f"doorman-agent {AGENT_VERSION}"
     )
 
+    # Audit arguments
+    parser.add_argument(
+        "--audit",
+        "-a",
+        action="store_true",
+        help="Run a one-time audit and print a formatted health report",
+    )
+    parser.add_argument(
+        "--deep",
+        "-d",
+        action="store_true",
+        help="Run deep configuration analysis (Redis/Celery settings)",
+    )
+    parser.add_argument(
+        "--config-check",
+        action="store_true",
+        dest="config_check",
+        help="Alias for --deep",
+    )
+    parser.add_argument(
+        "--samples",
+        type=int,
+        default=1,
+        help="Number of samples for audit (default: 1, use >1 for trend detection)",
+    )
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=10,
+        help="Seconds between audit samples (default: 10)",
+    )
+
     # Simulation arguments
     parser.add_argument(
         "--simulate",
@@ -87,7 +127,6 @@ Get your API key at: https://doorman.com/dashboard/api-keys
         return
 
     # Import after arg parsing
-    from doorman_agent.agent import DoormanAgent
     from doorman_agent.config import load_config
 
     # Load configuration
@@ -101,7 +140,22 @@ Get your API key at: https://doorman.com/dashboard/api-keys
     if args.api_url:
         config.api_url = args.api_url
 
-    # Validate config
+    # Audit mode
+    if args.audit:
+        from doorman_agent.audit import run_audit
+
+        # --deep or --config-check enables deep mode
+        deep_mode = args.deep or args.config_check
+
+        exit_code = run_audit(
+            config=config,
+            samples=args.samples,
+            interval=args.interval,
+            deep=deep_mode,
+        )
+        sys.exit(exit_code)
+
+    # Validate config for daemon/once modes
     if not config.local_mode and not config.api_key:
         print("\n⚠️  No API key configured.")
         print("   Either set DOORMAN_API_KEY or use --local for local mode.")
@@ -109,6 +163,8 @@ Get your API key at: https://doorman.com/dashboard/api-keys
         sys.exit(1)
 
     # Create agent
+    from doorman_agent.agent import DoormanAgent
+
     agent = DoormanAgent(config)
 
     # Run (connection happens inside run/check_once)

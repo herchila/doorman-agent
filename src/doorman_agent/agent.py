@@ -2,7 +2,6 @@
 Main Doorman Agent class
 """
 
-from doorman_agent.config import AGENT_VERSION
 from __future__ import annotations
 
 import signal
@@ -12,6 +11,7 @@ from typing import Optional
 
 from doorman_agent.api_client import APIClient
 from doorman_agent.collector import MetricsCollector
+from doorman_agent.config import AGENT_VERSION
 from doorman_agent.logger import StructuredLogger
 from doorman_agent.models import Config, SystemMetrics
 

@@ -208,6 +208,161 @@ doorman-agent --simulate --workers 0 --enqueue 50  # Simulate outage
 
 ---
 
+## Audit Mode
+
+One-time health check with a formatted report. Perfect for CI/CD, debugging, or quick status checks.
+
+```bash
+doorman-agent --audit
+```
+
+**Sample output:**
+
+```
+🔍 Doorman Audit
+════════════════════════════════════════════════════════════
+
+Infrastructure
+  ✅ Redis: connected
+  ✅ Celery: connected (4 workers)
+
+Workers
+  ✅ worker-1: online (2/4 slots)
+  ✅ worker-2: online (3/4 slots)
+  ⚠️  worker-3: online (4/4 slots) — at capacity
+  ❌ worker-4: offline
+
+Queues
+  ✅ celery: 12 pending, 2.1s latency
+  ✅ notifications: empty
+  🔥 emails: 847 pending, 125s latency — CONGESTED
+
+Metrics
+  📊 Saturation: 68.7% (11/16 slots)
+  ⏱️  Max Latency: 125s (emails)
+  📋 Total Pending: 859 tasks
+
+════════════════════════════════════════════════════════════
+💡 Recommendations:
+  • Scale workers for 'emails' queue (847 pending, 125s latency)
+  • Check 1 offline worker(s) — not responding to ping
+
+════════════════════════════════════════════════════════════
+⚠️  Warnings detected
+```
+
+**Exit codes (for CI/CD):**
+
+| Code | Meaning |
+|------|---------|
+| `0` | ✅ Healthy |
+| `1` | ⚠️ Warnings (congested queues, workers at capacity) |
+| `2` | ❌ Critical (stuck tasks, dead workers) |
+
+### Trend Detection
+
+Use multiple samples to detect if queues are growing or shrinking:
+
+```bash
+# Collect 3 samples, 10 seconds apart
+doorman-agent --audit --samples 3 --interval 10
+```
+
+**Sample output with trends:**
+
+```
+Queues
+  ✅ celery: 45 pending ↑+15
+  🔥 emails: 847 pending, 125s latency ↑+203 — CONGESTED
+  ✅ notifications: 10 pending ↓-5
+
+Trends (over 3 samples)
+  ↑ emails: +203 tasks (644 → 847)
+  ↓ notifications: -5 tasks (15 → 10)
+
+💡 Recommendations:
+  • Possible ghost workers: 'emails' growing but saturation is low (25.0%)
+```
+
+This helps diagnose:
+- **Growing + high saturation** → Need more workers
+- **Growing + low saturation** → Ghost workers (workers not picking up tasks)
+
+### Deep Configuration Analysis
+
+Run `--deep` to analyze your Redis and Celery configuration:
+
+```bash
+doorman-agent --audit --deep
+# or
+doorman-agent --audit --config-check
+```
+
+**Sample output:**
+
+```
+🔍 Doorman Audit
+════════════════════════════════════════════════════════════
+
+✅ System: HEALTHY
+
+Infrastructure
+  ✅ Redis: connected
+  ✅ Celery: connected (2 workers)
+
+Workers
+  Status  Worker                  Slots  Note
+  ✅      celery@worker-1         2/4    online
+  ✅      celery@worker-2         1/4    online
+
+Queues
+  Status  Queue          Pending  Latency  Trend
+  ✅      celery         0        0s       →
+
+Metrics
+  📊 Saturation: 18.8% (3/16 slots, headroom: 13 slots)
+  ⏱️  Max Latency: 0s (SLA Safe ✓)
+  📋 Total Pending: 0 tasks
+
+Configuration Analysis
+  Status  Check                           Result
+  ⚠️      Redis maxmemory                 Not set (risk of OOM)
+  ⚠️      Redis eviction policy           noeviction (writes fail when full)
+  ✅      Redis persistence               Enabled
+  ✅      Redis connection pool           12/10000 connections
+  ⚠️      Celery task_acks_late           False (task loss if worker dies)
+  ⚠️      Celery task_reject_on_worker_lost  False (silent task loss)
+  ⚠️      Celery prefetch_multiplier      4 (may cause uneven distribution)
+  ✅      Worker redundancy               2 workers (redundant)
+
+════════════════════════════════════════════════════════════
+💡 Recommendations:
+  • Redis maxmemory: CONFIG SET maxmemory 2gb
+  • Redis eviction policy: CONFIG SET maxmemory-policy volatile-lru
+  • Celery task_acks_late: Set task_acks_late=True in Celery config
+  • Celery task_reject_on_worker_lost: Set task_reject_on_worker_lost=True
+  • Celery prefetch_multiplier: Set worker_prefetch_multiplier=1 for long tasks
+
+════════════════════════════════════════════════════════════
+✅ All systems healthy
+Audit completed in 2.3s
+```
+
+**Checks included:**
+
+| Category | Check | Risk |
+|----------|-------|------|
+| Redis | `maxmemory` not set | OOM kill |
+| Redis | `maxmemory-policy = noeviction` | Writes fail when full |
+| Redis | Persistence disabled | Data loss on restart |
+| Redis | Connection pool > 80% | Connection exhaustion |
+| Celery | `task_acks_late = False` | Task loss if worker dies |
+| Celery | `task_reject_on_worker_lost = False` | Silent task loss |
+| Celery | `prefetch_multiplier > 1` | Uneven task distribution |
+| Infra | Single worker | Single point of failure |
+
+---
+
 ## Security
 
 - **No inbound connections** — Agent pushes to API, never listens

@@ -149,11 +149,22 @@ class MetricsCollector:
             return 0
 
     def get_oldest_task_age(self, queue_name: str) -> Optional[float]:
-        """Estimates the age of the oldest task in the queue"""
+        """
+        Estimates the age of the oldest task in the queue.
+        
+        Celery messages may or may not have timestamps depending on configuration.
+        We try multiple strategies:
+        1. Check headers.timestamp (if task_send_sent_event=True)
+        2. Check properties.timestamp
+        3. Check headers.eta (for scheduled tasks)
+        
+        Returns None if no timestamp is available.
+        """
         if not self.redis_client:
             return None
 
         try:
+            # Get oldest message (last in list, since LPUSH adds to head)
             oldest_message = self.redis_client.lindex(queue_name, -1)
             if not oldest_message:
                 return None
@@ -165,19 +176,34 @@ class MetricsCollector:
                     task_data = json.loads(oldest_message.decode("utf-8"))
 
                 headers = task_data.get("headers", {})
+                properties = task_data.get("properties", {})
+                
                 timestamp = None
 
+                # Strategy 1: Check headers.timestamp
                 if "timestamp" in headers:
                     timestamp = headers["timestamp"]
-                elif "properties" in task_data and "timestamp" in task_data["properties"]:
-                    timestamp = task_data["properties"]["timestamp"]
+                
+                # Strategy 2: Check properties.timestamp
+                elif "timestamp" in properties:
+                    timestamp = properties["timestamp"]
+                
+                # Strategy 3: Check if there's a published time in properties
+                elif "published" in properties:
+                    timestamp = properties["published"]
 
                 if timestamp:
-                    task_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+                    # Handle both float timestamps and ISO strings
+                    if isinstance(timestamp, (int, float)):
+                        task_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+                    else:
+                        # Try parsing ISO format
+                        task_time = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+                    
                     age = (datetime.now(timezone.utc) - task_time).total_seconds()
                     return max(0, age)
 
-            except (json.JSONDecodeError, KeyError, TypeError):
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                 pass
 
             return None
